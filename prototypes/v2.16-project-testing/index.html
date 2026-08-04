@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2.16 项目级测试流程原型</title>
+  <style>
+    :root { color-scheme: light; --bg:#f3f5f8; --panel:#fff; --text:#182230; --muted:#667085; --line:#e4e7ec; --brand:#3659d9; --brand-soft:#eef2ff; --green:#087a55; --green-soft:#ecfdf3; --amber:#a15c07; --amber-soft:#fffaeb; --red:#b42318; --red-soft:#fef3f2; --cyan:#087e8b; --cyan-soft:#ecfeff; --shadow:0 1px 3px rgba(16,24,40,.08); }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:3px solid rgba(54,89,217,.2); outline-offset:2px; }
+    .topbar { position:sticky; top:0; z-index:30; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 22px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.97); }
+    .brand,.inline,.actions,.filters { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+    .logo { display:grid; width:32px; height:32px; place-items:center; border-radius:9px; background:var(--brand); color:#fff; font-weight:800; }
+    .badge,.tag { display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; background:#f2f4f7; color:#475467; font-size:11px; font-weight:750; }
+    .badge { background:var(--brand-soft); color:var(--brand); }
+    .tag.green { background:var(--green-soft); color:var(--green); } .tag.amber { background:var(--amber-soft); color:var(--amber); } .tag.red { background:var(--red-soft); color:var(--red); } .tag.cyan { background:var(--cyan-soft); color:var(--cyan); }
+    .field { min-height:38px; border:1px solid #d0d5dd; border-radius:9px; padding:8px 10px; background:#fff; color:var(--text); }
+    .role { display:flex; align-items:center; gap:8px; color:var(--muted); }
+    .layout { display:grid; grid-template-columns:245px minmax(0,1fr); width:min(1500px,100%); min-height:calc(100vh - 58px); margin:auto; }
+    aside { border-right:1px solid var(--line); padding:20px 14px; background:#fafbfc; }
+    .project-mini { margin-bottom:18px; padding:12px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .nav { display:grid; gap:5px; }
+    .nav button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; border:0; border-radius:9px; padding:10px 11px; background:transparent; color:var(--muted); text-align:left; }
+    .nav button.active { background:var(--brand-soft); color:var(--brand); font-weight:750; }
+    .nav button:hover { background:#f0f2f5; }
+    main { min-width:0; padding:24px; }
+    h1,h2,h3,p { margin-top:0; } h1 { margin-bottom:5px; font-size:25px; } h2 { margin-bottom:4px; font-size:19px; } h3 { margin-bottom:10px; font-size:15px; }
+    .muted { color:var(--muted); } .tiny { color:var(--muted); font-size:12px; }
+    .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:18px; }
+    .btn { min-height:38px; border:1px solid var(--line); border-radius:9px; padding:8px 13px; background:#fff; color:var(--text); font-weight:700; }
+    .btn:hover { border-color:#b8c0cc; background:#f9fafb; }
+    .btn.primary { border-color:var(--brand); background:var(--brand); color:#fff; } .btn.success { border-color:var(--green); background:var(--green); color:#fff; } .btn.danger { border-color:#fecdca; background:var(--red-soft); color:var(--red); } .btn.small { min-height:30px; padding:5px 9px; font-size:12px; }
+    .btn[disabled] { cursor:not-allowed; opacity:.45; }
+    .btn.active-result { box-shadow:0 0 0 3px rgba(54,89,217,.18); }
+    .panel { margin-bottom:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); box-shadow:var(--shadow); }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:15px 18px; border-bottom:1px solid var(--line); }
+    .panel-body { padding:18px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:15px; } .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; } .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
+    label > span.label { display:block; margin-bottom:5px; color:#344054; font-size:12px; font-weight:750; }
+    textarea.field { width:100%; min-height:90px; resize:vertical; }
+    input.field,select.field { width:100%; }
+    .switch-row { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:10px; }
+    .notice { margin-bottom:14px; border:1px solid #c7d2fe; border-radius:10px; padding:11px 13px; background:var(--brand-soft); color:#3445a4; }
+    .notice.warn { border-color:#fedf89; background:var(--amber-soft); color:var(--amber); } .notice.error { border-color:#fecdca; background:var(--red-soft); color:var(--red); } .notice.success { border-color:#abefc6; background:var(--green-soft); color:var(--green); }
+    .stepper { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:18px; }
+    .step { min-width:0; border-bottom:3px solid var(--line); padding:7px 4px; color:var(--muted); font-size:11px; text-align:center; }
+    .step.active { border-color:var(--brand); color:var(--brand); font-weight:800; } .step.done { border-color:var(--green); color:var(--green); }
+    .kpi { border:1px solid var(--line); border-radius:11px; padding:13px; background:#fff; }
+    .kpi strong { display:block; margin:5px 0 2px; font-size:21px; }
+    .table-wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; }
+    th { padding:9px 10px; border-bottom:1px solid var(--line); color:var(--muted); font-size:11px; text-align:left; white-space:nowrap; } td { padding:10px; border-bottom:1px solid var(--line); vertical-align:top; } tr:last-child td { border-bottom:0; }
+    .check-list { display:grid; gap:7px; } .check { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; }
+    .status-line { display:flex; align-items:center; gap:8px; }
+    .queue-card { padding:15px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .queue-card + .queue-card { margin-top:12px; }
+    .queue-meta { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:12px 0; }
+    .meta-box { padding:9px; border-radius:9px; background:#f8fafc; }
+    .timeline { display:grid; gap:10px; } .timeline-row { display:grid; grid-template-columns:95px 13px 1fr; gap:8px; } .dot { width:9px; height:9px; margin-top:6px; border-radius:50%; background:var(--brand); }
+    .scope-row { display:grid; grid-template-columns:28px minmax(190px,1fr) 110px 120px 1fr; gap:10px; align-items:center; padding:10px; border-bottom:1px solid var(--line); }
+    .scope-row:last-child { border-bottom:0; }
+    .history-card { display:grid; grid-template-columns:70px minmax(150px,1fr) 150px 160px 1fr; gap:12px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line); }
+    .history-card:last-child { border-bottom:0; }
+    .permission { padding:10px 12px; border-left:3px solid var(--brand); background:#f8fafc; }
+    .modal-backdrop { position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.48); }
+    .modal-backdrop.open { display:flex; }
+    .modal { width:min(680px,100%); max-height:92vh; overflow:auto; border-radius:15px; background:#fff; box-shadow:0 24px 64px rgba(15,23,42,.25); }
+    .modal-head,.modal-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line); } .modal-foot { border-top:1px solid var(--line); border-bottom:0; }
+    .modal-body { padding:18px; }
+    .error-text { display:none; margin-top:6px; color:var(--red); font-size:12px; } .error-text.show { display:block; }
+    .page[hidden],.conditional[hidden] { display:none; }
+    @media (max-width:1050px) { .layout { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } .nav { grid-template-columns:repeat(3,1fr); } .grid-4 { grid-template-columns:repeat(2,1fr); } .queue-meta { grid-template-columns:repeat(2,1fr); } }
+    @media (max-width:700px) { .topbar { align-items:flex-start; padding:10px 13px; } .role { align-items:flex-start; flex-direction:column; } main { padding:15px; } .nav { grid-template-columns:1fr 1fr; } .page-head,.form-grid,.grid-2,.grid-3,.grid-4 { display:grid; grid-template-columns:1fr; } .stepper { grid-template-columns:1fr; } .step { text-align:left; } .scope-row,.history-card { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">QA</span><strong>项目级测试流程</strong><span class="badge">v2.16 原型 · 不写数据</span></div>
+    <label class="role"><span>当前角色</span><select id="roleSelect" class="field"><option value="project_owner">项目负责人 · 张伟</option><option value="test_lead">测试组长 · 李敏</option><option value="main_tester">主测试负责人 · 王小明</option><option value="participant">参与测试人员 · 周琳</option><option value="department_manager">部门经理 · 赵经理</option></select></label>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="project-mini"><strong>凤凰商城移动端</strong><div class="tiny">软件交付项目 · V2.0 发布</div><div class="inline" style="margin-top:8px"><span id="projectStatusTag" class="tag amber">开发完成/待提测</span><span id="cycleStatusTag" class="tag">暂无活动轮次</span></div></div>
+      <nav class="nav">
+        <button class="active" data-page="plan"><span>1. 项目测试计划</span></button>
+        <button data-page="cockpit"><span>2. 项目驾驶舱</span></button>
+        <button data-page="queue"><span>3. 测试排期队列</span></button>
+        <button data-page="cycle"><span>4. 测试轮次详情</span></button>
+        <button data-page="repairs"><span>5. 修复与再次提测</span></button>
+        <button data-page="completion"><span>6. 项目完成确认</span></button>
+      </nav>
+      <button id="resetDemo" class="btn" style="width:100%;margin-top:18px">重置完整流程</button>
+    </aside>
+
+    <main>
+      <div class="stepper" aria-label="当前流程阶段"><div class="step active" data-stage="plan">测试计划</div><div class="step" data-stage="requested">待接单</div><div class="step" data-stage="accepted">已排期</div><div class="step" data-stage="in_progress">测试中</div><div class="step" data-stage="conclusion_pending">待确认结论</div><div class="step" data-stage="result">通过/不通过</div><div class="step" data-stage="completed">项目完成</div></div>
+
+      <section id="page-plan" class="page">
+        <div class="page-head"><div><h1>项目创建 / 编辑 · 测试计划</h1><p class="muted">项目负责人提出需求和期望窗口；测试组长确认资源与排期。</p></div><span id="planStatusTag" class="tag">草稿</span></div>
+        <div id="planPermission" class="permission" style="margin-bottom:14px"></div>
+        <section class="panel"><div class="panel-head"><div><strong>测试计划</strong><div class="tiny">软件交付项目默认需要测试</div></div></div><div class="panel-body">
+          <label class="switch-row"><input id="requiresTesting" type="checkbox" checked><span><strong>项目需要测试</strong><span class="tiny" style="display:block">关闭时必须选择“学习/调研、内部管理或其他”原因。</span></span></label>
+          <div id="testPlanFields" class="form-grid" style="margin-top:15px">
+            <label><span class="label">测试组 *</span><select id="testTeam" class="field"><option>移动质量组</option><option>平台测试组</option></select></label>
+            <label><span class="label">推荐主测试负责人</span><select id="recommendedOwner" class="field"><option>王小明（当前 2 个同期项目）</option><option>周琳（当前 1 个同期项目）</option></select><span class="tiny">仅推荐，最终由测试组长确认</span></label>
+            <label><span class="label">总体计划测试开始 *</span><input id="planStart" class="field" type="date" value="2026-07-20"></label>
+            <label><span class="label">总体计划测试结束 *</span><input id="planEnd" class="field" type="date" value="2026-07-31"></label>
+            <label style="grid-column:1/-1"><span class="label">测试说明 / 质量目标 *</span><textarea id="qualityGoal" class="field">覆盖登录、下单、支付、退款主流程；支付阻断 Bug 必须清零；P1/P2 缺陷关闭后才可通过。</textarea></label>
+          </div>
+          <div id="noTestReasonBox" class="conditional" hidden style="margin-top:15px"><label><span class="label">无需测试原因 *</span><select id="noTestReason" class="field"><option value="">请选择</option><option>学习 / 调研</option><option>内部管理</option><option>其他</option></select></label></div>
+          <div id="planError" class="error-text">请完整填写测试组、测试窗口和质量目标；结束日期不得早于开始日期。</div>
+          <div class="actions" style="justify-content:flex-end;margin-top:15px"><button id="submitPlan" class="btn primary">提交测试计划给测试组长</button></div>
+        </div></section>
+      </section>
+
+      <section id="page-cockpit" class="page" hidden>
+        <div class="page-head"><div><h1>项目驾驶舱 · 测试阶段</h1><p class="muted">项目负责人从这里发起项目/阶段/版本测试，并在通过后确认完成。</p></div><button id="openRequestModal" class="btn primary">发起项目提测</button></div>
+        <div id="cockpitPermission" class="permission" style="margin-bottom:14px"></div>
+        <div class="grid-4"><article class="kpi"><span class="tiny">总体测试窗口</span><strong>07-20–07-31</strong><span class="tiny">项目计划，不覆盖轮次实际时间</span></article><article class="kpi"><span class="tiny">测试组</span><strong>移动质量组</strong><span class="tiny">组长：李敏</span></article><article class="kpi"><span class="tiny">当前测试阶段</span><strong id="cockpitStage">待发起</strong><span class="tiny" id="cockpitOwner">主测试人待确认</span></article><article class="kpi"><span class="tiny">最近有效结论</span><strong id="latestResult">未通过</strong><span class="tiny">#1 阶段 Alpha · 已进入修复</span></article></div>
+        <section class="panel" style="margin-top:16px"><div class="panel-head"><div><strong>当前 / 最近项目测试轮次</strong><div class="tiny">新项目轮次与历史单任务测试分开</div></div></div><div class="panel-body"><div id="cycleHistory"></div><details style="margin-top:12px"><summary>历史单任务测试（4）· 只读，不参与新轮次统计</summary><div class="notice warn" style="margin-top:10px">来源：历史单任务测试。保留原 `linked_task_id` 与旧测试汇总，不合并到项目测试轮次的通过率、Bug 或覆盖率分母。</div></details></div></section>
+      </section>
+
+      <section id="page-queue" class="page" hidden>
+        <div class="page-head"><div><h1>测试排期 / 接单队列</h1><p class="muted">测试组长管理计划审核、轮次接单、排期、人员与结论确认。</p></div><div class="filters"><select class="field"><option>全部状态</option><option>待接单</option><option>已排期</option><option>测试中</option><option>待确认结论</option></select><select class="field"><option>全部负责人</option><option>王小明</option><option>周琳</option></select></div></div>
+        <div id="queuePermission" class="permission" style="margin-bottom:14px"></div>
+        <section class="panel"><div class="panel-head"><strong>待处理队列</strong><span class="tiny">跨项目容量仅作风险提示，不做绩效排名</span></div><div class="panel-body">
+          <article id="planQueueCard" class="queue-card"><div class="inline"><strong>项目测试计划 · 凤凰商城移动端</strong><span id="queuePlanStatus" class="tag">等待项目负责人提交</span></div><div class="queue-meta"><div class="meta-box"><span class="tiny">期望窗口</span><strong style="display:block">07-20–07-31</strong></div><div class="meta-box"><span class="tiny">推荐主测试人</span><strong style="display:block">王小明</strong></div><div class="meta-box"><span class="tiny">同期项目</span><strong style="display:block">2 个</strong></div><div class="meta-box"><span class="tiny">风险</span><strong style="display:block;color:var(--amber)">07-20 冲突</strong></div></div><div id="planQueueActions" class="actions"><button id="acceptPlan" class="btn success">接受并确认计划</button><button id="returnPlan" class="btn danger">退回计划</button></div></article>
+          <article id="cycleQueueCard" class="queue-card"><div class="inline"><strong>项目测试轮次 · <span id="queueCycleName">尚未发起</span></strong><span id="queueCycleStatus" class="tag">—</span></div><div class="queue-meta"><div class="meta-box"><span class="tiny">范围快照</span><strong id="queueScopeCount" style="display:block">—</strong></div><div class="meta-box"><span class="tiny">本轮期望时间</span><strong style="display:block">07-22–07-26</strong></div><div class="meta-box"><span class="tiny">主测试负责人</span><strong id="queueMainTester" style="display:block">待分配</strong></div><div class="meta-box"><span class="tiny">参与人员</span><strong id="queueParticipants" style="display:block">待分配</strong></div></div><div id="cycleQueueActions" class="actions"></div></article>
+        </div></section>
+      </section>
+
+      <section id="page-cycle" class="page" hidden>
+        <div class="page-head"><div><h1>项目测试轮次详情</h1><p class="muted">V2.0 发布 · 当前轮次 <span id="cycleNumberText">#2</span></p></div><div class="inline"><span id="cycleDetailStatus" class="tag">未发起</span><button id="openZentao" class="btn">打开禅道测试任务</button></div></div>
+        <div id="cyclePermission" class="permission" style="margin-bottom:14px"></div>
+        <div class="grid-4"><article class="kpi"><span class="tiny">测试组长</span><strong>李敏</strong><span class="tiny">结论最终确认人</span></article><article class="kpi"><span class="tiny">主测试负责人</span><strong id="cycleMainTester">待分配</strong><span class="tiny">执行与提交结论</span></article><article class="kpi"><span class="tiny">本轮计划</span><strong id="cycleDates">07-22–07-26</strong><span class="tiny">实际开始：<span id="actualStart">—</span></span></article><article class="kpi"><span class="tiny">范围快照</span><strong id="detailScopeCount">0 项</strong><span class="tiny">发起后不可随任务变化</span></article></div>
+        <div class="grid-2" style="margin-top:16px"><section class="panel"><div class="panel-head"><strong>执行控制</strong><span id="workSegmentState" class="tag">未计时</span></div><div class="panel-body"><div class="actions"><button id="startCycle" class="btn primary">开始测试</button><button id="pauseCycle" class="btn">暂停</button><button id="resumeCycle" class="btn">恢复</button><button id="submitConclusion" class="btn success">提交测试结论</button></div><div class="notice warn" style="margin-top:14px">暂停必须说明环境阻断、等待修复或人员调整原因；恢复会开启新的工时段。</div></div></section><section class="panel"><div class="panel-head"><strong>本轮人员</strong><button id="changeTester" class="btn small">测试组长调整人员</button></div><div class="panel-body"><div class="check-list"><div class="check"><span>王小明 · 主测试负责人</span><span class="tag amber">同期 2 项</span></div><div class="check"><span>周琳 · 参与测试</span><span class="tag green">可用</span></div><div class="check"><span>陈杰 · 参与测试</span><span class="tag">部分投入</span></div></div></div></section></div>
+        <section class="panel"><div class="panel-head"><strong>范围快照</strong><span class="tiny">只展示发起时快照，不随任务后续编辑变化</span></div><div class="panel-body" id="frozenScope"><div class="muted">尚未发起本轮测试</div></div></section>
+        <section class="panel"><div class="panel-head"><strong>执行与确认时间轴</strong></div><div class="panel-body"><div id="cycleTimeline" class="timeline"></div></div></section>
+      </section>
+
+      <section id="page-repairs" class="page" hidden>
+        <div class="page-head"><div><h1>修复任务与再次提测</h1><p class="muted">不通过只关联具体修复任务，不批量打回范围内全部开发任务。</p></div><button id="retestBtn" class="btn primary">发起下一轮项目测试</button></div>
+        <div id="repairPermission" class="permission" style="margin-bottom:14px"></div>
+        <section class="panel"><div class="panel-head"><strong>本轮关联修复任务</strong><span id="repairSummary" class="tag">暂无</span></div><div class="panel-body"><div id="repairTaskList" class="check-list"></div><div class="actions" style="margin-top:14px"><button id="createRepair" class="btn">创建修复任务</button><button id="linkRepair" class="btn">关联已有修复任务</button><button id="approveRepair" class="btn success">模拟项目负责人审批完成</button></div></div></section>
+      </section>
+
+      <section id="page-completion" class="page" hidden>
+        <div class="page-head"><div><h1>项目完成确认</h1><p class="muted">测试通过不会自动完成；项目负责人承担最终完成确认。</p></div><span id="completionStatus" class="tag">尚未满足</span></div>
+        <div id="completionPermission" class="permission" style="margin-bottom:14px"></div>
+        <section class="panel"><div class="panel-head"><strong>完成前检查</strong></div><div class="panel-body"><div class="check-list"><div class="check"><span>所有开发 / 修复任务已完成并审批</span><span id="checkTasks" class="tag red">未满足</span></div><div class="check"><span>无活动测试轮次</span><span id="checkActiveCycle" class="tag red">未满足</span></div><div class="check"><span>最近有效项目测试轮次通过</span><span id="checkPassed" class="tag red">未满足</span></div><div class="check"><span>无未处理阻断与遗留风险已确认</span><span id="checkRisks" class="tag amber">待确认</span></div></div><label class="switch-row" style="margin-top:14px"><input id="acceptResidualRisk" type="checkbox"><span><strong>我已核对测试报告与遗留风险</strong><span class="tiny" style="display:block">项目负责人最终确认，不由测试组长代替。</span></span></label><div class="actions" style="justify-content:flex-end;margin-top:14px"><button id="completeProject" class="btn success">确认完成项目</button></div></div></section>
+      </section>
+    </main>
+  </div>
+
+  <div id="requestModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><div><strong>发起项目提测</strong><div class="tiny">固化本轮阶段/版本与开发任务范围</div></div><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><div class="form-grid"><label><span class="label">阶段 / 版本名称 *</span><input id="cycleName" class="field" value="V2.0 发布"></label><label><span class="label">测试方式</span><select id="testMethod" class="field"><option>标准用例测试</option><option>快速 / 探索性验证</option></select></label><label><span class="label">本轮计划开始 *</span><input id="cycleStart" class="field" type="date" value="2026-07-22"></label><label><span class="label">本轮计划结束 *</span><input id="cycleEnd" class="field" type="date" value="2026-07-26"></label><label><span class="label">环境 / 版本信息 *</span><input id="environmentInfo" class="field" value="UAT · app-v2.0.0-rc3"></label><label><span class="label">禅道测试任务链接 *</span><input id="zentaoLink" class="field" value="https://zentao.example.com/testtask-208"></label></div><h3 style="margin-top:16px">默认范围：已审批完成且未被通过轮次覆盖</h3><div id="scopeSelector" class="panel" style="box-shadow:none;margin-bottom:0"></div><div id="requestError" class="error-text">准入未通过：请选择至少一个合格任务，并完整填写阶段、时间、环境和禅道链接。</div></div><div class="modal-foot"><span class="tiny">提交后生成 project_test_cycles 和一条项目级测试任务</span><button id="confirmRequest" class="btn primary">确认发起提测</button></div></div></div>
+
+  <div id="planReviewModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong>测试组长确认项目测试计划</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><div class="notice warn">推荐的王小明在 07-20 同期已有 2 个项目。可调整开始时间或更换主测试人。</div><div class="form-grid"><label><span class="label">确认计划开始</span><input id="confirmPlanStart" class="field" type="date" value="2026-07-22"></label><label><span class="label">确认计划结束</span><input id="confirmPlanEnd" class="field" type="date" value="2026-07-31"></label><label><span class="label">默认主测试负责人</span><select id="confirmDefaultOwner" class="field"><option>王小明</option><option>周琳</option></select></label><label><span class="label">调整原因</span><input id="planAdjustReason" class="field" value="避开同期支付平台回归高峰"></label></div></div><div class="modal-foot"><button id="confirmAcceptPlan" class="btn success">确认接受计划</button></div></div></div>
+
+  <div id="returnModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong id="returnModalTitle">退回原因</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><textarea id="returnReason" class="field" placeholder="说明范围、环境、资源或质量数据需要补充的内容"></textarea><div id="returnError" class="error-text">退回原因必填</div></div><div class="modal-foot"><button id="confirmReturn" class="btn danger">确认退回</button></div></div></div>
+
+  <div id="acceptCycleModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong id="acceptCycleTitle">接受轮次并确认排期人员</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><div class="form-grid"><label><span class="label">计划开始</span><input id="acceptStart" class="field" type="date" value="2026-07-22"></label><label><span class="label">计划结束</span><input id="acceptEnd" class="field" type="date" value="2026-07-26"></label><label><span class="label">主测试负责人</span><select id="assignMainTester" class="field"><option>王小明</option><option>周琳</option><option>李敏（测试组长兼任）</option></select></label><label><span class="label">参与人员</span><select id="assignParticipants" class="field" multiple><option selected>周琳</option><option selected>陈杰</option><option>孙梅</option></select></label><label style="grid-column:1/-1"><span class="label">排期 / 换人原因</span><input id="cycleAdjustReason" class="field" placeholder="调整时间或换人时必填"></label></div></div><div class="modal-foot"><button id="confirmAcceptCycle" class="btn success">确认接单并排期</button></div></div></div>
+
+  <div id="pauseModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong>暂停测试</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><label><span class="label">暂停原因 *</span><select id="pauseReason" class="field"><option>环境阻断</option><option>等待修复</option><option>人员调整</option></select></label><textarea id="pauseNote" class="field" style="margin-top:10px" placeholder="补充具体情况">支付沙箱回调不稳定，等待环境恢复。</textarea></div><div class="modal-foot"><button id="confirmPause" class="btn primary">确认暂停</button></div></div></div>
+
+  <div id="conclusionModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong>主测试负责人提交结论</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><div class="filters"><button class="btn success active-result" data-result="pass">通过</button><button class="btn danger" data-result="fail">不通过</button></div><div class="form-grid" style="margin-top:14px"><label><span class="label">计划 / 执行用例</span><div class="inline"><input id="plannedCases" class="field" type="number" value="48"><span>/</span><input id="executedCases" class="field" type="number" value="47"></div></label><label><span class="label">新增 Bug / Reopen / 阻断</span><div class="inline"><input id="bugCount" class="field" type="number" value="6"><input id="reopenCount" class="field" type="number" value="1"><input id="blockCount" class="field" type="number" value="0"></div></label><label style="grid-column:1/-1"><span class="label">结论说明 *</span><textarea id="conclusionNote" class="field">主流程验证完成，P1/P2 缺陷已关闭，遗留 2 个低风险体验问题。</textarea></label></div><div id="failureBox" class="notice error" hidden><strong>不通过必须关联具体修复任务</strong><label class="switch-row" style="margin-top:8px"><input id="createFixOnSubmit" type="checkbox"><span>创建修复任务“修复支付回调幂等与异常补偿”</span></label></div><div id="conclusionError" class="error-text">请填写结论说明；不通过时至少创建或关联一个修复任务。</div></div><div class="modal-foot"><span class="tiny">提交后进入 conclusion_pending，不会直接生效</span><button id="confirmSubmitConclusion" class="btn primary">提交给测试组长确认</button></div></div></div>
+
+  <div id="confirmConclusionModal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal"><div class="modal-head"><strong>测试组长确认结论</strong><button class="btn small" data-close-modal>关闭</button></div><div class="modal-body"><div id="conclusionReviewSummary" class="notice"></div><div class="check-list"><div class="check"><span>范围快照覆盖</span><strong>5 / 5</strong></div><div class="check"><span>用例执行率</span><strong>47 / 48 · 98%</strong></div><div class="check"><span>新增 Bug / Reopen / 阻断</span><strong>6 / 1 / 0</strong></div><div class="check"><span>禅道链接与遗留风险</span><strong>已填写</strong></div></div></div><div class="modal-foot"><button id="returnConclusion" class="btn danger">退回补充</button><button id="confirmConclusion" class="btn success">确认原结论</button></div></div></div>
+
+  <script>
+    const $ = (s, root=document) => root.querySelector(s);
+    const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+    const roles = { project_owner:'项目负责人', test_lead:'测试组长', main_tester:'主测试负责人', participant:'参与测试人员', department_manager:'部门经理' };
+    const eligibleTasks = [
+      { id:'DEV-101', title:'登录与会话刷新', status:'done', covered:false, eligible:true },
+      { id:'DEV-108', title:'购物车价格重算', status:'delayed_done', covered:false, eligible:true },
+      { id:'DEV-113', title:'支付回调状态同步', status:'done', covered:false, eligible:true },
+      { id:'DEV-118', title:'退款进度查询', status:'done', covered:false, eligible:true },
+      { id:'FIX-021', title:'修复 Alpha 轮支付超时', status:'done', covered:false, eligible:true },
+      { id:'DEV-120', title:'推荐缓存优化', status:'review', covered:false, eligible:false },
+      { id:'DEV-099', title:'旧版订单兼容', status:'done', covered:true, eligible:false },
+    ];
+    const initialHistory = [{ no:1, name:'阶段 Alpha', result:'failed', dates:'07-05–07-08', scope:18, owner:'王小明', bugs:9, reopen:2, blocked:1 }];
+    let state;
+    let currentPage = 'plan';
+    let returnAction = '';
+    let selectedResult = 'pass';
+    let cycleAssignmentMode = 'accept';
+
+    function resetState() {
+      state = { planStatus:'draft', cycleStatus:'none', cycleNo:2, cycleName:'V2.0 发布', scope:[], mainTester:'', participants:[], conclusion:'', projectStatus:'dev_done', fixCreated:false, fixApproved:false, riskAccepted:false, history:[...initialHistory], timeline:[] };
+      selectedResult = 'pass';
+      updateAll();
+    }
+
+    function role() { return $('#roleSelect').value; }
+    function isRole(name) { return role() === name; }
+    function showPage(page) { currentPage = page; $$('.page').forEach(p => p.hidden = p.id !== `page-${page}`); $$('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page)); updateAll(); window.scrollTo(0,0); }
+    function openModal(id) { $(`#${id}`).classList.add('open'); }
+    function closeModals() { $$('.modal-backdrop').forEach(m => m.classList.remove('open')); }
+    function tag(text, tone='') { return `<span class="tag ${tone}">${text}</span>`; }
+
+    function stageIndex() {
+      if (state.projectStatus === 'completed') return 6;
+      if (['passed','failed'].includes(state.cycleStatus)) return 5;
+      return ({ draft:0, pending:0, accepted:0, requested:1, cycle_accepted:2, in_progress:3, paused:3, conclusion_pending:4, none:0 })[state.cycleStatus === 'none' ? state.planStatus : state.cycleStatus] || 0;
+    }
+
+    function updateAll() {
+      const mainRoleOption = $('#roleSelect').querySelector('option[value="main_tester"]');
+      mainRoleOption.textContent = state.mainTester ? `主测试负责人 · ${state.mainTester}` : '主测试负责人（尚未分配）';
+      const idx = stageIndex();
+      $$('.step').forEach((step,i) => { step.classList.toggle('done', i < idx); step.classList.toggle('active', i === idx); });
+      const cycleLabel = ({ none:'暂无活动轮次', requested:'待接单', cycle_accepted:'已排期', in_progress:'测试中', paused:'已暂停', conclusion_pending:'待确认结论', passed:'测试通过', failed:'测试不通过' })[state.cycleStatus];
+      $('#cycleStatusTag').textContent = cycleLabel;
+      $('#cycleStatusTag').className = `tag ${state.cycleStatus === 'passed' ? 'green' : state.cycleStatus === 'failed' ? 'red' : ['requested','conclusion_pending'].includes(state.cycleStatus) ? 'amber' : 'cyan'}`;
+      const projectLabel = ({ dev_done:'开发完成/待提测', testing:'项目测试中', fixing:'修复中', test_passed:'测试通过/待完成确认', completed:'已完成' })[state.projectStatus];
+      $('#projectStatusTag').textContent = projectLabel;
+      $('#projectStatusTag').className = `tag ${state.projectStatus === 'completed' || state.projectStatus === 'test_passed' ? 'green' : state.projectStatus === 'fixing' ? 'red' : 'amber'}`;
+      updatePermissions(); updatePlan(); updateCockpit(); updateQueue(); updateCycle(); updateRepairs(); updateCompletion();
+    }
+
+    function updatePermissions() {
+      $('#planPermission').innerHTML = isRole('project_owner') ? '<strong>你的操作：</strong>维护并提交项目测试计划。不能直接占用测试人员。' : isRole('test_lead') ? '<strong>你的操作：</strong>在测试队列审核计划并确认资源；此处只读。' : `<strong>${roles[role()]}视角：</strong>测试计划只读。`;
+      $('#cockpitPermission').innerHTML = isRole('project_owner') ? '<strong>你的操作：</strong>发起项目提测；测试通过后确认项目完成。' : `<strong>${roles[role()]}视角：</strong>可查看测试阶段，但不显示项目提测和完成按钮。`;
+      $('#queuePermission').innerHTML = isRole('test_lead') ? '<strong>你的操作：</strong>接受/退回、排期、分配人员和确认结论。' : `<strong>${roles[role()]}视角：</strong>队列只读，不显示测试组长操作。`;
+      const leadAlsoMain = isRole('test_lead') && state.mainTester.startsWith('李敏');
+      $('#cyclePermission').innerHTML = isRole('main_tester') ? '<strong>你的操作：</strong>开始、暂停、恢复并提交整轮结论。' : leadAlsoMain ? '<strong>双重身份：</strong>你兼任主测试负责人，可执行并提交；提交后仍必须进入队列执行独立“确认结论”动作。' : isRole('test_lead') ? '<strong>你的操作：</strong>调整人员；待确认时核对并确认或退回结论。' : isRole('participant') ? '<strong>你的操作：</strong>执行分配范围并记录结果；不能改变整轮状态或提交最终结论。' : `<strong>${roles[role()]}视角：</strong>轮次只读。`;
+      $('#repairPermission').innerHTML = isRole('project_owner') ? '<strong>你的操作：</strong>组织具体修复任务、审批完成并发起下一轮测试。' : `<strong>${roles[role()]}视角：</strong>修复任务只读。`;
+      $('#completionPermission').innerHTML = isRole('project_owner') ? '<strong>你的操作：</strong>核对最近有效通过轮次和遗留风险后最终完成项目。' : `<strong>${roles[role()]}视角：</strong>不能替代项目负责人完成项目。`;
+      $('#submitPlan').hidden = !isRole('project_owner'); $('#openRequestModal').hidden = !isRole('project_owner'); $('#retestBtn').hidden = !isRole('project_owner'); $('#createRepair').hidden = !isRole('project_owner'); $('#linkRepair').hidden = !isRole('project_owner'); $('#approveRepair').hidden = !isRole('project_owner'); $('#completeProject').hidden = !isRole('project_owner');
+    }
+
+    function updatePlan() {
+      $('#planStatusTag').textContent = ({ draft:'草稿', pending:'待测试组长审核', accepted:'测试组长已确认', returned:'已退回' })[state.planStatus];
+      $('#planStatusTag').className = `tag ${state.planStatus === 'accepted' ? 'green' : state.planStatus === 'returned' ? 'red' : state.planStatus === 'pending' ? 'amber' : ''}`;
+      const editable = isRole('project_owner') && ['draft','returned'].includes(state.planStatus);
+      ['requiresTesting','testTeam','recommendedOwner','planStart','planEnd','qualityGoal'].forEach(id => { $(`#${id}`).disabled = !editable; });
+      $('#submitPlan').disabled = !editable;
+    }
+
+    function renderHistory() {
+      const current = state.cycleStatus !== 'none' ? [{ no:state.cycleNo, name:state.cycleName, result:state.cycleStatus, dates:$('#cycleStart').value.slice(5) + '–' + $('#cycleEnd').value.slice(5), scope:state.scope.length, owner:state.mainTester || '待分配', bugs:6, reopen:1, blocked:selectedResult === 'fail' ? 1 : 0 }] : [];
+      const rows = [...current, ...state.history].map(c => `<div class="history-card"><strong>#${c.no}</strong><div><strong>${c.name}</strong><div class="tiny">范围快照 ${c.scope} 项</div></div><span>${c.dates}</span><span>${c.owner}</span><div>${tag(({ requested:'待接单', cycle_accepted:'已排期', in_progress:'测试中', paused:'暂停', conclusion_pending:'待确认', passed:'通过', failed:'不通过' })[c.result] || c.result, c.result === 'passed' ? 'green' : c.result === 'failed' ? 'red' : 'amber')}<div class="tiny">Bug ${c.bugs} · Reopen ${c.reopen} · 阻断 ${c.blocked}</div></div></div>`).join('');
+      $('#cycleHistory').innerHTML = rows || '<div class="muted">暂无项目测试轮次</div>';
+    }
+
+    function updateCockpit() {
+      $('#cockpitStage').textContent = ({ none:'待发起', requested:'待测试组接单', cycle_accepted:'已排期/待开始', in_progress:'测试中', paused:'已暂停', conclusion_pending:'待测试组长确认', failed:'修复中', passed:'测试通过/待完成确认' })[state.cycleStatus];
+      $('#cockpitOwner').textContent = state.mainTester ? `主测试负责人：${state.mainTester}` : '主测试人待确认';
+      $('#latestResult').textContent = state.cycleStatus === 'passed' ? '通过' : state.cycleStatus === 'failed' ? '不通过' : '未通过';
+      $('#openRequestModal').disabled = state.planStatus !== 'accepted' || state.cycleStatus !== 'none';
+      renderHistory();
+    }
+
+    function updateQueue() {
+      $('#queuePlanStatus').textContent = ({ draft:'等待项目负责人提交', pending:'待测试组长审核', accepted:'已确认', returned:'已退回' })[state.planStatus];
+      $('#planQueueActions').hidden = !isRole('test_lead') || state.planStatus !== 'pending';
+      $('#queueCycleName').textContent = state.cycleStatus === 'none' ? '尚未发起' : `#${state.cycleNo} ${state.cycleName}`;
+      $('#queueCycleStatus').textContent = ({ none:'—', requested:'待接单', cycle_accepted:'已排期', in_progress:'测试中', paused:'暂停', conclusion_pending:'待确认结论', passed:'已通过', failed:'未通过' })[state.cycleStatus];
+      $('#queueScopeCount').textContent = state.scope.length ? `${state.scope.length} 个开发任务` : '—'; $('#queueMainTester').textContent = state.mainTester || '待分配'; $('#queueParticipants').textContent = state.participants.length ? state.participants.join('、') : '待分配';
+      const actions = $('#cycleQueueActions'); actions.innerHTML = '';
+      if (isRole('test_lead') && state.cycleStatus === 'requested') actions.innerHTML = '<button class="btn success" id="acceptCycle">接受并排期</button><button class="btn danger" id="returnCycle">退回提测</button>';
+      if (isRole('test_lead') && state.cycleStatus === 'conclusion_pending') actions.innerHTML = '<button class="btn success" id="reviewConclusion">核对并确认结论</button><button class="btn danger" id="queueReturnConclusion">退回补充</button>';
+      $('#acceptCycle')?.addEventListener('click', () => { cycleAssignmentMode='accept'; $('#acceptCycleTitle').textContent='接受轮次并确认排期人员'; $('#confirmAcceptCycle').textContent='确认接单并排期'; openModal('acceptCycleModal'); }); $('#returnCycle')?.addEventListener('click', () => openReturn('cycle')); $('#reviewConclusion')?.addEventListener('click', () => openConclusionReview()); $('#queueReturnConclusion')?.addEventListener('click', () => openReturn('conclusion'));
+    }
+
+    function updateCycle() {
+      $('#cycleNumberText').textContent = `#${state.cycleNo}`; $('#cycleDetailStatus').textContent = ({ none:'未发起', requested:'待接单', cycle_accepted:'已排期', in_progress:'测试中', paused:'暂停', conclusion_pending:'待确认结论', passed:'通过', failed:'不通过' })[state.cycleStatus]; $('#cycleMainTester').textContent = state.mainTester || '待分配'; $('#detailScopeCount').textContent = `${state.scope.length} 项`; $('#queueScopeCount').textContent = state.scope.length ? `${state.scope.length} 个开发任务` : '—'; $('#cycleDates').textContent = `${$('#cycleStart').value.slice(5)}–${$('#cycleEnd').value.slice(5)}`; $('#actualStart').textContent = state.timeline.some(t => t.type === 'start') ? '07-22 09:10' : '—';
+      const canExecute = isRole('main_tester') || (isRole('test_lead') && state.mainTester.startsWith('李敏'));
+      $('#startCycle').hidden = !(canExecute && state.cycleStatus === 'cycle_accepted'); $('#pauseCycle').hidden = !(canExecute && state.cycleStatus === 'in_progress'); $('#resumeCycle').hidden = !(canExecute && state.cycleStatus === 'paused'); $('#submitConclusion').hidden = !(canExecute && state.cycleStatus === 'in_progress'); $('#changeTester').hidden = !isRole('test_lead') || !['cycle_accepted','in_progress','paused'].includes(state.cycleStatus);
+      $('#workSegmentState').textContent = state.cycleStatus === 'in_progress' ? '工时段进行中' : state.cycleStatus === 'paused' ? '工时段已闭合' : '未计时';
+      $('#frozenScope').innerHTML = state.scope.length ? state.scope.map(t => `<div class="scope-row"><span>✓</span><strong>${t.id}</strong><span>${t.status}</span><span>${t.covered ? '已覆盖' : '未覆盖'}</span><span>${t.title}</span></div>`).join('') : '<div class="muted">尚未发起本轮测试</div>';
+      $('#cycleTimeline').innerHTML = state.timeline.length ? state.timeline.map(t => `<div class="timeline-row"><span class="tiny">${t.time}</span><span class="dot"></span><div><strong>${t.title}</strong><div class="tiny">${t.note}</div></div></div>`).join('') : '<div class="muted">暂无本轮操作记录</div>';
+    }
+
+    function updateRepairs() {
+      $('#repairSummary').textContent = state.fixCreated ? (state.fixApproved ? '1 项已审批完成' : '1 项处理中') : '暂无'; $('#repairTaskList').innerHTML = state.fixCreated ? `<div class="check"><div><strong>FIX-035 修复支付回调幂等与异常补偿</strong><div class="tiny">来源：项目测试轮次 #${state.cycleNo} 不通过</div></div>${tag(state.fixApproved ? 'done · 已审批' : 'in_progress', state.fixApproved ? 'green' : 'amber')}</div>` : '<div class="muted">测试不通过后必须创建或关联至少一个具体修复任务。</div>';
+      $('#approveRepair').disabled = !state.fixCreated || state.fixApproved; $('#retestBtn').disabled = !(state.cycleStatus === 'failed' && state.fixApproved);
+    }
+
+    function updateCompletion() {
+      const passed = state.cycleStatus === 'passed' || state.projectStatus === 'completed'; const noActive = passed; const tasksDone = passed || state.fixApproved; const risks = $('#acceptResidualRisk').checked;
+      setCheck('#checkTasks', tasksDone); setCheck('#checkActiveCycle', noActive); setCheck('#checkPassed', passed); setCheck('#checkRisks', risks);
+      const ready = passed && noActive && tasksDone && risks && isRole('project_owner'); $('#completeProject').disabled = !ready || state.projectStatus === 'completed'; $('#completionStatus').textContent = state.projectStatus === 'completed' ? '项目已完成' : ready ? '可以完成' : '尚未满足'; $('#completionStatus').className = `tag ${state.projectStatus === 'completed' || ready ? 'green' : 'amber'}`;
+    }
+    function setCheck(selector, ok) { const el=$(selector); el.textContent=ok?'已满足':'未满足'; el.className=`tag ${ok?'green':'red'}`; }
+
+    function renderScopeSelector() { $('#scopeSelector').innerHTML = eligibleTasks.map(t => `<label class="scope-row"><input type="checkbox" data-scope-id="${t.id}" ${t.eligible ? 'checked' : ''} ${t.eligible ? '' : 'disabled'}><strong>${t.id}</strong><span>${t.status}</span><span>${t.covered ? '已被通过轮次覆盖' : '未覆盖'}</span><span>${t.title}${t.eligible ? '' : t.status === 'review' ? ' · 未审批，禁止纳入' : ' · 默认不重复纳入'}</span></label>`).join(''); }
+    function openReturn(action) { returnAction=action; $('#returnModalTitle').textContent = action==='plan'?'退回项目测试计划':action==='cycle'?'退回项目提测':'退回结论补充'; $('#returnReason').value=''; $('#returnError').classList.remove('show'); openModal('returnModal'); }
+    function openConclusionReview() { $('#conclusionReviewSummary').innerHTML = `<strong>主测试负责人提交：${state.conclusion === 'pass' ? '通过' : '不通过'}</strong><br>确认后才正式生效；测试组长不能无说明直接改写结论。`; openModal('confirmConclusionModal'); }
+
+    $('#roleSelect').addEventListener('change', updateAll); $$('[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page))); $('#resetDemo').addEventListener('click',()=>{resetState();showPage('plan');}); $$('[data-close-modal]').forEach(b=>b.addEventListener('click',closeModals)); $$('.modal-backdrop').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModals();}));
+    $('#requiresTesting').addEventListener('change',e=>{ $('#testPlanFields').hidden=!e.target.checked; $('#noTestReasonBox').hidden=e.target.checked; });
+    $('#submitPlan').addEventListener('click',()=>{ const valid=$('#requiresTesting').checked?$('#testTeam').value&&$('#planStart').value&&$('#planEnd').value&&$('#qualityGoal').value.trim()&&$('#planEnd').value>=$('#planStart').value:$('#noTestReason').value; $('#planError').classList.toggle('show',!valid); if(valid){state.planStatus='pending';updateAll();showPage('queue');} });
+    $('#acceptPlan').addEventListener('click',()=>{if(isRole('test_lead')&&state.planStatus==='pending')openModal('planReviewModal');}); $('#returnPlan').addEventListener('click',()=>openReturn('plan')); $('#confirmAcceptPlan').addEventListener('click',()=>{state.planStatus='accepted';closeModals();updateAll();showPage('cockpit');});
+    $('#openRequestModal').addEventListener('click',()=>{renderScopeSelector();openModal('requestModal');});
+    $('#confirmRequest').addEventListener('click',()=>{ const scope=eligibleTasks.filter(t=>t.eligible&&$(`[data-scope-id="${t.id}"]`).checked); const valid=scope.length&&$('#cycleName').value.trim()&&$('#cycleStart').value&&$('#cycleEnd').value&&$('#environmentInfo').value.trim()&&$('#zentaoLink').value.trim(); $('#requestError').classList.toggle('show',!valid); if(valid){state.cycleName=$('#cycleName').value.trim();state.scope=scope.map(t=>({...t}));state.cycleStatus='requested';state.projectStatus='testing';state.timeline=[{type:'request',time:'07-19 14:20',title:'项目负责人发起提测',note:`固化范围 ${scope.length} 项，生成项目级测试任务`}];closeModals();updateAll();showPage('queue');} });
+    $('#confirmAcceptCycle').addEventListener('click',()=>{const previousStatus=state.cycleStatus;state.mainTester=$('#assignMainTester').value;state.participants=Array.from($('#assignParticipants').selectedOptions).map(o=>o.value).filter(name=>!state.mainTester.startsWith(name));if(cycleAssignmentMode==='accept'){state.cycleStatus='cycle_accepted';state.timeline.push({type:'accept',time:'07-19 16:05',title:'测试组长接单并确认排期',note:`主测试人 ${state.mainTester}；参与 ${state.participants.join('、')}`});}else{state.cycleStatus=previousStatus;state.timeline.push({type:'reassign',time:'07-23 17:00',title:'测试组长调整测试人员',note:`主测试人 ${state.mainTester}；原因：${$('#cycleAdjustReason').value||'人员调度'}`});}closeModals();updateAll();showPage('cycle');});
+    $('#confirmReturn').addEventListener('click',()=>{const valid=$('#returnReason').value.trim();$('#returnError').classList.toggle('show',!valid);if(!valid)return;if(returnAction==='plan')state.planStatus='returned';if(returnAction==='cycle'){state.cycleStatus='none';state.projectStatus='dev_done';state.scope=[];}if(returnAction==='conclusion'){state.cycleStatus='in_progress';state.timeline.push({type:'return',time:'07-26 17:10',title:'测试组长退回补充',note:$('#returnReason').value.trim()});}closeModals();updateAll();});
+    $('#startCycle').addEventListener('click',()=>{state.cycleStatus='in_progress';state.timeline.push({type:'start',time:'07-22 09:10',title:'主测试负责人开始测试',note:'记录实际开始时间并开启项目测试任务工时段'});updateAll();}); $('#pauseCycle').addEventListener('click',()=>openModal('pauseModal')); $('#confirmPause').addEventListener('click',()=>{state.cycleStatus='paused';state.timeline.push({type:'pause',time:'07-23 15:40',title:`暂停：${$('#pauseReason').value}`,note:$('#pauseNote').value});closeModals();updateAll();}); $('#resumeCycle').addEventListener('click',()=>{state.cycleStatus='in_progress';state.timeline.push({type:'resume',time:'07-24 09:00',title:'恢复测试',note:'开启新的项目测试任务工时段'});updateAll();});
+    $('#submitConclusion').addEventListener('click',()=>openModal('conclusionModal')); $$('[data-result]').forEach(b=>b.addEventListener('click',()=>{selectedResult=b.dataset.result;$$('[data-result]').forEach(x=>x.classList.toggle('active-result',x===b));$('#failureBox').hidden=selectedResult!=='fail';}));
+    $('#confirmSubmitConclusion').addEventListener('click',()=>{const valid=$('#conclusionNote').value.trim()&&(selectedResult==='pass'||$('#createFixOnSubmit').checked);$('#conclusionError').classList.toggle('show',!valid);if(!valid)return;state.conclusion=selectedResult;state.fixCreated=selectedResult==='fail'&&$('#createFixOnSubmit').checked;state.cycleStatus='conclusion_pending';state.timeline.push({type:'submit',time:'07-26 16:30',title:`主测试负责人提交${selectedResult==='pass'?'通过':'不通过'}结论`,note:'等待测试组长确认，结论尚未正式生效'});closeModals();updateAll();showPage('queue');});
+    $('#confirmConclusion').addEventListener('click',()=>{state.cycleStatus=state.conclusion==='pass'?'passed':'failed';state.projectStatus=state.conclusion==='pass'?'test_passed':'fixing';state.timeline.push({type:'confirm',time:'07-26 17:20',title:`测试组长确认${state.conclusion==='pass'?'通过':'不通过'}结论`,note:'质量结论正式生效'});closeModals();updateAll();showPage(state.conclusion==='pass'?'completion':'repairs');}); $('#returnConclusion').addEventListener('click',()=>{closeModals();openReturn('conclusion');});
+    $('#createRepair').addEventListener('click',()=>{state.fixCreated=true;updateAll();}); $('#linkRepair').addEventListener('click',()=>{state.fixCreated=true;updateAll();}); $('#approveRepair').addEventListener('click',()=>{state.fixApproved=true;if(!eligibleTasks.some(t=>t.id==='FIX-035'))eligibleTasks.unshift({id:'FIX-035',title:'修复支付回调幂等与异常补偿',status:'done',covered:false,eligible:true});updateAll();}); $('#retestBtn').addEventListener('click',()=>{state.history.unshift({no:state.cycleNo,name:state.cycleName,result:'failed',dates:'07-22–07-26',scope:state.scope.length,owner:state.mainTester,bugs:6,reopen:1,blocked:1});state.cycleNo+=1;state.cycleStatus='none';state.scope=[];state.mainTester='';state.participants=[];state.conclusion='';selectedResult='pass';state.projectStatus='dev_done';state.timeline=[];updateAll();showPage('cockpit');});
+    $('#acceptResidualRisk').addEventListener('change',updateAll); $('#completeProject').addEventListener('click',()=>{state.projectStatus='completed';updateAll();}); $('#changeTester').addEventListener('click',()=>{if(isRole('test_lead')){cycleAssignmentMode='reassign';$('#acceptCycleTitle').textContent='调整主测试负责人和参与人员';$('#confirmAcceptCycle').textContent='确认调整人员';openModal('acceptCycleModal');}}); $('#openZentao').addEventListener('click',()=>alert('原型：打开本轮禅道测试任务链接。'));
+
+    resetState(); showPage('plan');
+  </script>
+</body>
+</html>
