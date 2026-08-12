@@ -38,6 +38,7 @@
 | 0009 三来源资源汇总 | 内部项目/外部测试/测试建设；建设不计项目成本 | `rpc('get_test_resource_summary')` |
 | 0009 项目测试完成门禁 | 通过轮次或已批准无需测试；admin 原因强制 | `rpc('complete_project')` 新门禁字段 |
 | 0010 内部测试候选项目与创建复核 | 仅项目负责人；活动项目、无活动轮次、非无需测试、存在已审批未覆盖任务 | `rpc('get_eligible_internal_test_projects')` + `create_test_plan` 分支 |
+| 0011 测试结论终态与建设详情汇总 | `pass/fail` 映射为 `passed/failed`；详情与列表统一四项聚合 | `review_test_conclusion` 分支 + `constructionSummary()` |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

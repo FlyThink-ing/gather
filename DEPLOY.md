@@ -213,7 +213,7 @@ test -f webpack.config.js
 ls -1 supabase/migrations/*.sql
 ```
 
-迁移文件必须完整显示 `0001_init.sql` 到 `0010_internal_test_project_candidates.sql`。
+迁移文件必须完整显示 `0001_init.sql` 到 `0011_fix_test_conclusion_and_construction_summary.sql`。
 
 ---
 
@@ -368,7 +368,7 @@ docker compose logs --tail 100 realtime
 `supabase/migrations` 中的 SQL 不只是建表，还包含 RLS、业务触发器、RPC、审批规则和项目驾驶舱。后一个文件依赖前一个文件，必须严格执行：
 
 ```text
-0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010
+0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011
 ```
 
 这些脚本不是为反复执行设计的。新数据库只执行一次；已存在数据库升级时只执行尚未执行的新编号。不要看到报错后从 `0001` 全部重跑。
@@ -451,7 +451,7 @@ where pubname='supabase_realtime'
 期望：
 
 - 表清单包含 `projects`、`tasks`、`test_plans`、`test_cycles`、`test_activities`、`test_execution_batches`、`test_construction_works`、`task_approval_audits`、`project_status_events` 等；
-- 第二条输出 `actual_started_at` 和 `completed_at`，证明 `0008` 已执行；另应确认 `0010_internal_test_project_candidates.sql` 已执行，`get_eligible_internal_test_projects(text)` 可被 `authenticated` 调用；
+- 第二条输出 `actual_started_at` 和 `completed_at`，证明 `0008` 已执行；另应确认 `0010_internal_test_project_candidates.sql` 和 `0011_fix_test_conclusion_and_construction_summary.sql` 已执行，`get_eligible_internal_test_projects(text)` 可被 `authenticated` 调用，且测试结论终态与测试建设详情聚合已更新；
 - 第三条输出 `1`，证明实时通知已启用。
 
 ---

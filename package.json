@@ -6,7 +6,10 @@
   "scripts": {
     "start": "webpack serve --mode development",
     "build": "webpack --mode production",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:uat:smoke": "playwright test --grep @smoke",
+    "test:uat:full": "playwright test",
+    "test:uat:report": "playwright show-report reports/uat/html"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -19,6 +22,7 @@
     "recharts": "^2.12.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",

@@ -102,6 +102,7 @@ npm run build
 0008_project_cockpit.sql
 0009_testing_center.sql
 0010_internal_test_project_candidates.sql
+0011_fix_test_conclusion_and_construction_summary.sql
 ```
 
 迁移包含表结构、RLS 策略、触发器和 RPC。请勿跳号、重复执行或在生产库中直接修改已执行迁移；详细操作见 [DEPLOY.md](DEPLOY.md)。

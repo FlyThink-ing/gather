@@ -1465,8 +1465,10 @@ export function createDemoClient() {
         if (!String(params.p_reason ?? '').trim()) return err('退回结论必须填写原因');
         cycle.status = 'in_progress'; cycle.conclusion_return_reason = String(params.p_reason).trim(); plan.status = 'in_progress';
       } else {
-        cycle.status = cycle.proposed_result; cycle.actual_completed_at = now(); cycle.conclusion_confirmed_by = DEMO_DEV_ID; cycle.conclusion_confirmed_at = now();
-        plan.status = cycle.proposed_result;
+        const terminalStatus = cycle.proposed_result === 'pass' ? 'passed' : cycle.proposed_result === 'fail' ? 'failed' : null;
+        if (!terminalStatus) return err('待确认测试结论无效');
+        cycle.status = terminalStatus; cycle.actual_completed_at = now(); cycle.conclusion_confirmed_by = DEMO_DEV_ID; cycle.conclusion_confirmed_at = now();
+        plan.status = terminalStatus;
         const project = store.projects.find((item) => item.id === plan.project_id);
         if (project) project.test_state = cycle.proposed_result === 'pass' ? 'passed' : 'fixing';
         for (const activity of store.test_activities.filter((item) => item.cycle_id === cycle.id)) {

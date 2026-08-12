@@ -1,6 +1,14 @@
 node_modules/
 dist/
 .env
+.env.uat
+.env.uat.*
+!.env.uat.example
 *.log
 .DS_Store
 .claude/
+playwright-report/
+test-results/
+artifacts/uat/
+reports/uat/
+.uat-run-state.json
