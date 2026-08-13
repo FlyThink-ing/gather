@@ -2,6 +2,8 @@
 
 本目录说明 Gather 的 Playwright UAT。测试分为 `smoke`（几分钟内完成的发布前检查）与 `full`（完整回归）。测试默认只使用 Chromium CLI，不依赖浏览器扩展。
 
+自动化验收完成后，业务人员按[手工验收测试指南](./MANUAL-TEST-GUIDE.md)准备环境和角色，并使用[手工验收测试清单](./MANUAL-TEST-CHECKLIST.md)逐项记录实际结果、证据与签字结论。
+
 ## 1. 首次准备
 
 ```powershell
