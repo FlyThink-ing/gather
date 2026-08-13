@@ -169,6 +169,11 @@ test('外部测试排期、活动、批次、工时、结构化结论退回与�
       `test_cycles?select=status,proposed_result&id=eq.${cycleId}`,
     );
     expect(finalCycle.data?.[0]).toMatchObject({ status: 'passed', proposed_result: 'pass' });
+    const finalPlan = await tester.rest.request<Array<{ status: string }>>(
+      tester.page,
+      `test_plans?select=status&id=eq.${planId}`,
+    );
+    expect(finalPlan.data?.[0]?.status).toBe('passed');
 
     await tester.page.goto(`/#/testing/plans/${planId}`);
     await expect(tester.page.getByRole('heading', { name: planTitle })).toBeVisible();
@@ -257,10 +262,45 @@ test('测试建设创建、排期、拆分、更新进度、工时与成果确�
       `test_construction_works?select=status&id=eq.${workId}`,
     );
     expect(finalWork.data?.[0]?.status).toBe('completed');
+
+    type ConstructionSummary = {
+      id: string;
+      task_count: number;
+      done_count: number;
+      planned_hours: number;
+      actual_hours: number;
+    };
+    const detail = await rpc<ConstructionSummary & { tasks: Array<{ actual_hours: number; planned_hours: number }> }>(
+      automation,
+      'get_construction_detail',
+      { p_work_id: workId },
+    );
+    expect(detail.status).toBe(200);
+    expect(detail.data).toMatchObject({ task_count: 1, done_count: 1, planned_hours: 8, actual_hours: 1 });
+    expect(detail.data?.tasks).toEqual([
+      expect.objectContaining({ planned_hours: 8, actual_hours: 1 }),
+    ]);
+
+    const list = await rpc<{ items: ConstructionSummary[] }>(automation, 'get_construction_works', {
+      p_status: null,
+      p_page: 1,
+      p_page_size: 100,
+    });
+    expect(list.status).toBe(200);
+    expect(list.data?.items.find((item) => item.id === workId)).toMatchObject({
+      task_count: 1,
+      done_count: 1,
+      planned_hours: 8,
+      actual_hours: 1,
+    });
+
     await automation.page.goto(`/#/testing/construction/${workId}`);
     await expect(automation.page.getByRole('heading', { name: title })).toBeVisible();
     await expect(automation.page.getByText('已完成').first()).toBeVisible();
-    await expect(automation.page.getByText('1.0 小时').first()).toBeVisible();
+    await expect(automation.page.getByText('任务进度', { exact: true }).locator('..')).toContainText('1/1');
+    await expect(automation.page.getByText('计划工时', { exact: true }).locator('..')).toContainText('8.0 小时');
+    await expect(automation.page.getByText('实际工时', { exact: true }).locator('..')).toContainText('1.0 小时');
+    await expect(automation.page.getByRole('heading', { name: '建设任务与实际工时' }).locator('..')).toContainText('1.0 小时 / 0.1 人天 / 8.0 小时 / 1.0 人天');
   } finally {
     await Promise.all(sessions.map(({ context }) => context.close()));
   }
