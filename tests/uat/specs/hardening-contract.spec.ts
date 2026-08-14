@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
+import ts from 'typescript';
 
 const root = path.resolve(process.env.UAT_CONTRACT_ROOT || process.cwd());
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -83,3 +84,77 @@ test('0012 权限、统计、工时与 UI 跨层合同完整 @hardening-static @
     'get_test_work_entries', 'update_test_work_entry', 'void_test_work_entry',
   ]) expect(demo, `demoClient 缺少 ${rpcName}`).toContain(`'${rpcName}'`);
 });
+
+test('UI-NATIVE-STATIC-01 运行时代码不得直接或间接引用原生对话框 @hardening-static @hardening', () => {
+  const forbidden = new Set(['alert', 'confirm', 'prompt']);
+  const violations: string[] = [];
+  const files = runtimeSourceFiles(path.join(root, 'src'));
+  const configPath = ts.findConfigFile(root, fs.existsSync, 'tsconfig.json');
+  expect(configPath, '项目必须存在 tsconfig.json 以解析全局与局部符号').toBeTruthy();
+  const config = ts.readConfigFile(configPath!, ts.sys.readFile);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  const program = ts.createProgram(files, { ...parsed.options, noEmit: true });
+  const checker = program.getTypeChecker();
+
+  for (const file of files) {
+    const source = program.getSourceFile(file);
+    expect(source, `TypeScript Program 未加载 ${file}`).toBeTruthy();
+    const visit = (node: ts.Node) => {
+      if (ts.isIdentifier(node) && forbidden.has(node.text)) {
+        const declarations = checker.getSymbolAtLocation(node)?.getDeclarations() ?? [];
+        const isDomGlobal = declarations.some((declaration) => /[/\\]lib\.dom(?:\.iterable)?\.d\.ts$/i.test(declaration.getSourceFile().fileName));
+        const unresolvedRuntimeCall = declarations.length === 0 && ts.isCallExpression(node.parent) && node.parent.expression === node;
+        if (isDomGlobal || unresolvedRuntimeCall) addViolation(source!, node, node.text);
+      }
+      if (
+        ts.isElementAccessExpression(node)
+        && ts.isIdentifier(node.expression)
+        && ['window', 'globalThis', 'self', 'top', 'parent'].includes(node.expression.text)
+        && ts.isStringLiteralLike(node.argumentExpression)
+        && forbidden.has(node.argumentExpression.text)
+      ) {
+        addViolation(source!, node, `${node.expression.text}['${node.argumentExpression.text}']`);
+      }
+      if (
+        ts.isVariableDeclaration(node)
+        && ts.isObjectBindingPattern(node.name)
+        && ts.isIdentifier(node.initializer)
+        && ['window', 'globalThis', 'self', 'top', 'parent'].includes(node.initializer.text)
+      ) {
+        for (const element of node.name.elements) {
+          const property = element.propertyName ?? element.name;
+          if (ts.isIdentifier(property) && forbidden.has(property.text)) addViolation(source!, element, `解构 ${node.initializer.text}.${property.text}`);
+        }
+      }
+      if (
+        ts.isCallExpression(node)
+        && ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression)
+        && node.expression.expression.text === 'Reflect'
+        && node.expression.name.text === 'get'
+        && ts.isIdentifier(node.arguments[0])
+        && ['window', 'globalThis', 'self', 'top', 'parent'].includes(node.arguments[0].text)
+        && ts.isStringLiteralLike(node.arguments[1])
+        && forbidden.has(node.arguments[1].text)
+      ) {
+        addViolation(source!, node, `Reflect.get(${node.arguments[0].text}, '${node.arguments[1].text}')`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    const addViolation = (sourceFile: ts.SourceFile, node: ts.Node, label: string) => {
+      const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      violations.push(`${path.relative(root, file)}:${line + 1}:${character + 1} ${label}`);
+    };
+    visit(source!);
+  }
+
+  expect(violations, 'src 运行时代码必须使用应用内反馈组件；原生 alert/confirm/prompt 零白名单').toEqual([]);
+});
+
+function runtimeSourceFiles(directory: string): string[] {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return runtimeSourceFiles(target);
+    return /\.(?:[cm]?[jt]sx?)$/i.test(entry.name) && !/\.d\.ts$/i.test(entry.name) ? [target] : [];
+  });
+}

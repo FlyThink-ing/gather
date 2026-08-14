@@ -51,6 +51,11 @@
 | HOURS-01 | hardening/P1 | 状态同步、工时修正与汇总 | accepted/todo 禁止登记；start/pause/resume 同步活动与任务；参与人执行期可登记；cancel 后活动 cancelled、任务锁定且禁止新增；修改、作废、终态组长修正及各层汇总一致 | 已自动化，待部署执行 |
 | HOURS-VIS-01 | hardening/P0 | 工时隔离 | 互不可见计划不泄露；建设参与人不能代记他人子任务工时 | 已自动化，待部署执行 |
 | UI-LAYOUT-01 | hardening/P2 | 活动与资源布局 | 375/768/1280、nowrap、无全局溢出、资源表可访问 | 已自动化，待部署执行 |
+| UI-NATIVE-STATIC-01 | hardening/P0 | 禁用原生对话框 | AST 扫描 src 运行时代码，直接/间接 alert/confirm/prompt 为 0，零白名单 | 已自动化，静态可执行 |
+| UI-CONFIRM-01 | hardening/P0 | 危险删除确认 | 应用内 dialog；取消后数据不变；native dialog 事件为 0 | 已自动化，待 UI 部署执行 |
+| UI-CONFIRM-02 | hardening/P0 | 自我降权确认 | 应用内 dialog；取消后角色不变；native dialog 事件为 0 | 已自动化，待 UI 部署执行 |
+| UI-FEEDBACK-01 | hardening/P1 | 普通错误反馈 | 必填错误在应用内显示，不触发原生对话框 | 已自动化，待 UI 部署执行 |
+| UI-NOTIFY-01/02 | hardening/P1 | 通知弹层布局与滚动 | 空态、20 条长文本、3 个桌面视口、边界、层级、横向溢出、末项、滚动隔离 | 已自动化，待 UI 部署执行 |
 | RULE-PARITY-01 | hardening/P0 | 五层一致 | UI、列表、深链、RPC/RLS、落库使用同一允许集合 | 已自动化，待部署执行 |
 
 首轮真实分角色执行前，应先确认本地 `.env.uat` 的业务身份映射，并检查已有 `UAT-质量保障组`、`UAT-研发组`、`UAT-全流程验收项目` 是否满足关系与状态前置条件。

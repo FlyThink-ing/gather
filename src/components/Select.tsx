@@ -43,13 +43,16 @@ export default function Select({
       ) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
 
@@ -79,7 +82,7 @@ export default function Select({
         <div
           ref={menuRef}
           style={position ? { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight } : { visibility: 'hidden' }}
-          className="fixed z-[60] min-w-max overflow-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 py-1 shadow-xl"
+          className="fixed z-[110] min-w-max overflow-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 py-1 shadow-xl"
         >
           {options.length === 0 && (
             <div className="px-3 py-2 text-xs text-slate-500">暂无选项</div>

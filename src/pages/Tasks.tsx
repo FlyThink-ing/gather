@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
+import { AlertDialog } from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import DatePicker from '../components/DatePicker';
 import {
@@ -152,6 +153,7 @@ export default function Tasks() {
   const [manageErr, setManageErr] = useState('');
   const [adminAction, setAdminAction] = useState<Task | null>(null);
   const [adminActionReason, setAdminActionReason] = useState('');
+  const [notice, setNotice] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
     const [t, p, d, tm, dt, tr, aa] = await Promise.all([
@@ -337,7 +339,7 @@ export default function Tasks() {
   const updateStatus = async (t: Task, patch: Partial<Task>) => {
     const { error } = await supabase.from('tasks').update(patch).eq('id', t.id);
     if (error) {
-      alert(error.message);
+      setNotice(error.message);
       return false;
     }
     await load();
@@ -381,7 +383,7 @@ export default function Tasks() {
   const submitReview = (t: Task) => {
     const project = projects.find((p) => p.id === t.project_id);
     if (t.project_id && !project?.owner_id) {
-      alert('该项目缺少负责人，请先在项目管理中补充负责人后再提交审核。');
+      setNotice('该项目缺少负责人，请先在项目管理中补充负责人后再提交审核。');
       return;
     }
     if (isTaskOverdue(t)) {
@@ -451,7 +453,7 @@ export default function Tasks() {
     if (!noteFor) return;
     if (!noteText.trim()) return;
     if (noteFor.mode === 'admin_reject' && !adminProxyReason.trim()) return;
-    if (noteText.length > TASK_NOTE_MAX) return alert(`备注不能超过 ${TASK_NOTE_MAX} 个字符`);
+    if (noteText.length > TASK_NOTE_MAX) return setNotice(`备注不能超过 ${TASK_NOTE_MAX} 个字符`);
     if (noteFor.mode === 'delay') {
       await updateStatus(noteFor.task, { status: 'review', delay_note: noteText.trim() });
     } else if (noteFor.mode === 'reject') {
@@ -463,7 +465,7 @@ export default function Tasks() {
         p_reason: adminProxyReason.trim(),
         p_reject_note: noteText.trim(),
       });
-      if (error) return alert(error.message);
+      if (error) return setNotice(error.message);
       await load();
     }
     setNoteFor(null);
@@ -1105,6 +1107,7 @@ export default function Tasks() {
           </div>
         </div>
       </Modal>
+      <AlertDialog open={!!notice} message={notice} onClose={() => setNotice('')} />
     </div>
   );
 }

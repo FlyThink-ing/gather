@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Select from '../components/Select';
+import { AlertDialog, ConfirmDialog } from '../components/ConfirmDialog';
 import { ROLE_LABEL, type Developer, type Role } from '../lib/types';
 
 interface UserRoleRow { user_id: string; role: Role }
@@ -44,6 +45,8 @@ export default function UserRoles() {
   const [roles, setRoles] = useState<UserRoleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingFor, setSavingFor] = useState<string | null>(null);
+  const [confirmingRole, setConfirmingRole] = useState<{ developer: Developer; role: Role } | null>(null);
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,18 +65,31 @@ export default function UserRoles() {
   const accounts = developers.filter((d) => d.user_id);
   const roleOf = (uid: string): Role => roles.find((r) => r.user_id === uid)?.role ?? 'user';
 
-  const changeRole = async (d: Developer, role: Role) => {
-    const cur = roleOf(d.user_id!);
-    if (cur === role) return;
-    if (d.user_id === session?.user?.id && role !== 'admin') {
-      if (!window.confirm('你正在降低自己的权限，操作后将立即失去管理员功能。确认继续？')) return;
-    }
+  const persistRole = async (d: Developer, role: Role): Promise<boolean> => {
     setSavingFor(d.id);
-    const { error } = await supabase.from('user_roles').update({ role }).eq('user_id', d.user_id!);
-    setSavingFor(null);
-    if (error) return alert(error.message);
-    await load();
-    if (d.user_id === session?.user?.id) await refresh();
+    try {
+      const { error } = await supabase.from('user_roles').update({ role }).eq('user_id', d.user_id!);
+      if (error) {
+        setNotice(error.message);
+        return false;
+      }
+      await load();
+      if (d.user_id === session?.user?.id) await refresh();
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '角色更新失败，请稍后重试');
+      return false;
+    } finally {
+      setSavingFor(null);
+    }
+  };
+  const changeRole = (d: Developer, role: Role) => {
+    if (roleOf(d.user_id!) === role) return;
+    if (d.user_id === session?.user?.id && role !== 'admin') {
+      setConfirmingRole({ developer: d, role });
+      return;
+    }
+    void persistRole(d, role);
   };
 
   const ROLE_BADGE: Record<Role, string> = {
@@ -169,6 +185,23 @@ export default function UserRoles() {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        title="确认降低自己的权限"
+        open={confirmingRole !== null}
+        message="你正在降低自己的权限，操作后将立即失去管理员功能。确认继续？"
+        onClose={() => { if (!savingFor) setConfirmingRole(null); }}
+        onConfirm={() => {
+          if (confirmingRole) {
+            void persistRole(confirmingRole.developer, confirmingRole.role).then((success) => {
+              if (success) setConfirmingRole(null);
+            });
+          }
+        }}
+        confirmText="确认继续"
+        busy={!!savingFor}
+        danger
+      />
+      <AlertDialog open={!!notice} message={notice} onClose={() => setNotice('')} />
     </div>
   );
 }

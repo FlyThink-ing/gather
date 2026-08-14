@@ -53,6 +53,10 @@ npm.cmd run test:uat:hardening
 | HOURS-01 | P1 | accepted 拆分后活动/任务为 todo 且禁止登记；start、pause、resume 同步活动与底层任务；参与人仅在可执行阶段登记；cancel 后活动 cancelled、任务锁定且禁止新增；两计划跨日期工时新增/修改/作废及各层汇总同源 |
 | HOURS-VIS-01 | P0 | 互不可见计划不在资源汇总泄露；建设参与人不能给他人负责的建设子任务代记工时 |
 | UI-LAYOUT-01 | P2 | 375/768/1280 下活动卡无全局横向溢出，工时数值 nowrap，资源表使用可访问横向滚动容器 |
+| UI-NATIVE-STATIC-01 | P0 | TypeScript AST 扫描全部 `src` 运行时代码，直接/间接原生 `alert/confirm/prompt` 引用为 0，零白名单 |
+| UI-CONFIRM-01/02 | P0 | 危险删除和自我降权必须使用应用内 dialog；取消后落库不变；任意 Playwright native dialog 事件立即失败 |
+| UI-FEEDBACK-01 | P1 | 普通必填错误使用应用内反馈，页面保持可操作且不触发原生对话框 |
+| UI-NOTIFY-01/02 | P1 | 空态、20 条长文本、内部滚动、末项可见、无横向溢出和滚动穿透；1440x900、1280x720、1024x576 下验证 bounding box 与 elementFromPoint 层级 |
 | RULE-PARITY-01 | P0 | 关键对象同时验证 UI 按钮、列表、深链、RPC/RLS 和最终落库五层一致 |
 
 ## 数据与结果判定

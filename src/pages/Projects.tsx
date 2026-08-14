@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
+import { AlertDialog } from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import DatePicker from '../components/DatePicker';
 import {
@@ -77,6 +78,7 @@ export default function Projects() {
   const [governance, setGovernance] = useState({ team_id: '', owner_id: '', reason: '' });
   const [transitioning, setTransitioning] = useState<ProjectSummary | null>(null);
   const [transitionReason, setTransitionReason] = useState('');
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,7 +203,7 @@ export default function Projects() {
         setForceReason('');
         setForceErr(error.message);
       } else {
-        window.alert(error.message);
+        setNotice(error.message);
       }
       return;
     }
@@ -435,6 +437,7 @@ export default function Projects() {
           </div>
         </div>
       </Modal>
+      <AlertDialog open={!!notice} message={notice} onClose={() => setNotice('')} />
     </div>
   );
 }

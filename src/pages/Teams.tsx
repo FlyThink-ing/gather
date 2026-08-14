@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Crown, X, UserPlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
+import { AlertDialog, ConfirmDialog } from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import type { Team, Developer } from '../lib/types';
 
@@ -21,6 +22,9 @@ export default function Teams() {
   // 添加成员：team_id -> 选中的 developer_id
   const [addingFor, setAddingFor] = useState<Team | null>(null);
   const [addDevId, setAddDevId] = useState('');
+  const [confirming, setConfirming] = useState<{ action: 'remove_team'; team: Team } | { action: 'remove_member'; linkId: string; name: string } | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,13 +76,6 @@ export default function Teams() {
     load();
   };
 
-  const remove = async (t: Team) => {
-    if (!window.confirm(`确认删除小组「${t.name}」？\n该小组下的项目和任务将失去小组归属（需重新分配）。`)) return;
-    const { error } = await supabase.from('teams').delete().eq('id', t.id);
-    if (error) alert(error.message);
-    load();
-  };
-
   const addMember = async () => {
     if (!addingFor || !addDevId) return;
     const dup = devTeams.some((x) => x.team_id === addingFor.id && x.developer_id === addDevId);
@@ -86,16 +83,21 @@ export default function Teams() {
     const { error } = await supabase
       .from('developer_teams')
       .insert({ developer_id: addDevId, team_id: addingFor.id });
-    if (error) alert(error.message);
+    if (error) setNotice(error.message);
     setAddingFor(null);
     setAddDevId('');
     load();
   };
 
-  const removeMember = async (linkId: string, name: string) => {
-    if (!window.confirm(`将「${name}」移出小组？`)) return;
-    const { error } = await supabase.from('developer_teams').delete().eq('id', linkId);
-    if (error) alert(error.message);
+  const runConfirmedAction = async () => {
+    if (!confirming || actionSaving) return;
+    setActionSaving(true);
+    const { error } = confirming.action === 'remove_team'
+      ? await supabase.from('teams').delete().eq('id', confirming.team.id)
+      : await supabase.from('developer_teams').delete().eq('id', confirming.linkId);
+    setActionSaving(false);
+    if (error) return setNotice(error.message);
+    setConfirming(null);
     load();
   };
 
@@ -158,7 +160,7 @@ export default function Teams() {
                       <Pencil size={15} />
                     </button>
                     <button
-                      onClick={() => remove(t)}
+                      onClick={() => setConfirming({ action: 'remove_team', team: t })}
                       className="rounded-md p-1.5 text-red-600 dark:text-red-400 hover:bg-red-500/10"
                       title="删除小组"
                     >
@@ -188,7 +190,7 @@ export default function Teams() {
                     >
                       {dev!.name}
                       <button
-                        onClick={() => removeMember(link.id, dev!.name)}
+                        onClick={() => setConfirming({ action: 'remove_member', linkId: link.id, name: dev!.name })}
                         className="text-slate-500 hover:text-red-600 dark:hover:text-red-400"
                         title="移出小组"
                       >
@@ -302,6 +304,19 @@ export default function Teams() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog
+        title={confirming?.action === 'remove_team' ? '删除小组' : '移出小组'}
+        open={confirming !== null}
+        message={confirming?.action === 'remove_team'
+          ? `确认删除小组「${confirming.team.name}」？\n该小组下的项目和任务将失去小组归属（需重新分配）。`
+          : confirming ? `将「${confirming.name}」移出小组？` : ''}
+        onClose={() => { if (!actionSaving) setConfirming(null); }}
+        onConfirm={runConfirmedAction}
+        confirmText={confirming?.action === 'remove_team' ? '确认删除' : '确认移出'}
+        busy={actionSaving}
+        danger
+      />
+      <AlertDialog open={!!notice} message={notice} onClose={() => setNotice('')} />
     </div>
   );
 }
