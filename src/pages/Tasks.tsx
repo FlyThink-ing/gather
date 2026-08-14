@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, Trash2, Lock, Search, Play, Pause, Send, Check, Undo2, ChevronLeft, ChevronRight, Link2, Eye, ExternalLink, ShieldAlert, ArrowLeft, X } from 'lucide-react';
+import { Plus, Pencil, Lock, Search, Play, Pause, Send, Check, Undo2, ChevronLeft, ChevronRight, Link2, Eye, ExternalLink, ShieldAlert, ArrowLeft, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
@@ -29,7 +29,7 @@ import {
   TIMING_BADGE,
 } from '../lib/types';
 import { planDays, isTaskOverdue, taskTimingState } from '../lib/workload';
-import { defaultScope, SCOPE_LABEL, type ScopeKey } from '../lib/scope';
+import { defaultScope, SCOPE_LABEL, type DevTeamLink, type ScopeKey } from '../lib/scope';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const formatDateTime = (value: string | null) =>
@@ -62,23 +62,24 @@ const emptyForm: TaskForm = {
 
 export default function Tasks() {
   const { role, developer } = useAuth();
-  const isAdminOrManager = role === 'admin' || role === 'manager';
+  const isAdmin = role === 'admin';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const sourceProject = searchParams.get('source') === 'project' && !!searchParams.get('project');
 
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [totalTasks, setTotalTasks] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [developers, setDevelopers] = useState<Developer[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [developerTeams, setDeveloperTeams] = useState<DevTeamLink[]>([]);
   const [testRounds, setTestRounds] = useState<TestRound[]>([]);
   const [approvalAudits, setApprovalAudits] = useState<TaskApprovalAudit[]>([]);
   const [contextTasks, setContextTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
   // v2.15：URL 是筛选条件唯一真源。刷新、复制链接、浏览器前进/后退都会恢复。
-  const sourceProject = searchParams.get('source') === 'project' && !!searchParams.get('project');
-  const scope = (searchParams.get('scope') as ScopeKey | null) ?? (sourceProject ? 'all' : defaultScope(role));
+  const scope = (searchParams.get('scope') as ScopeKey | null) ?? defaultScope(role);
   const q = searchParams.get('q') ?? '';
   const fType = searchParams.get('type') ?? '';
   const fProject = searchParams.get('project') ?? '';
@@ -146,9 +147,14 @@ export default function Tasks() {
   const [approvalErr, setApprovalErr] = useState('');
   // 挂起确认
   const [confirmPause, setConfirmPause] = useState<Task | null>(null);
+  const [managing, setManaging] = useState<Task | null>(null);
+  const [manageForm, setManageForm] = useState({ developer_id: '', start_date: '', due_date: '', priority: 'medium' as Priority, reason: '' });
+  const [manageErr, setManageErr] = useState('');
+  const [adminAction, setAdminAction] = useState<Task | null>(null);
+  const [adminActionReason, setAdminActionReason] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
-    const [t, p, d, tm, tr, aa] = await Promise.all([
+    const [t, p, d, tm, dt, tr, aa] = await Promise.all([
       supabase.rpc('list_tasks', {
         p_scope: scope,
         p_query: q.trim() || null,
@@ -170,6 +176,7 @@ export default function Tasks() {
       supabase.from('projects').select('*').order('name'),
       supabase.from('developers').select('*').order('name'),
       supabase.from('teams').select('*').order('name'),
+      supabase.from('developer_teams').select('developer_id, team_id'),
       supabase.from('test_rounds').select('*'),
       supabase.from('task_approval_audits').select('*').order('created_at', { ascending: false }),
     ]);
@@ -179,6 +186,7 @@ export default function Tasks() {
     setProjects((p.data as Project[]) ?? []);
     setDevelopers((d.data as Developer[]) ?? []);
     setTeams((tm.data as Team[]) ?? []);
+    setDeveloperTeams((dt.data as DevTeamLink[]) ?? []);
     setTestRounds((tr.data as TestRound[]) ?? []);
     setApprovalAudits((aa.data as TaskApprovalAudit[]) ?? []);
     setLoading(false);
@@ -246,8 +254,6 @@ export default function Tasks() {
     if (t.status === 'review') return false;
     // 测试中锁定：等待测试结论期间不可编辑（v2.5）
     if (t.status === 'testing') return false;
-    if (role === 'admin' || role === 'manager') return true;
-    // user：仅本人负责的在办任务
     return isMine(t);
   };
 
@@ -259,10 +265,7 @@ export default function Tasks() {
   // 甘特图/质量轮次联动：focus 也是 URL 条件，目标任务由服务端精确返回。
   useEffect(() => {
     if (!focusId || loading) return;
-    if (tasks.length === 0) {
-      if (scope !== 'all') setScope('all');
-      return;
-    }
+    if (tasks.length === 0) return;
     const scroll = setTimeout(() => {
       document.getElementById(`task-row-${focusId}`)?.scrollIntoView({ block: 'center' });
     }, 150);
@@ -296,41 +299,36 @@ export default function Tasks() {
     if (!form.title.trim()) return setFormErr('请填写任务标题');
     if (form.title.length > TASK_TITLE_MAX) return setFormErr(`任务标题不能超过 ${TASK_TITLE_MAX} 个字符`);
     if (form.description.length > TASK_DESCRIPTION_MAX) return setFormErr(`任务描述不能超过 ${TASK_DESCRIPTION_MAX} 个字符`);
-    if (!form.project_id) return setFormErr('请选择所属项目');
-    if (!form.start_date) return setFormErr('请选择开始日期');
-    if (!form.due_date) return setFormErr('请选择截止日期');
-    if (form.due_date < form.start_date) return setFormErr('截止日期不能早于开始日期');
-
     setSaving(true);
     setFormErr('');
-    // team_id 继承项目（v2 §4.5）
-    const project = projects.find((p) => p.id === form.project_id);
-    const payload = {
-      title: form.title.trim(),
-      description: form.description.trim() || null,
-      project_id: form.project_id,
-      developer_id: form.developer_id || null,
-      team_id: project?.team_id ?? null,
-      priority: form.priority,
-      start_date: form.start_date,
-      due_date: form.due_date,
-    };
-
-    const res =
-      editing === 'new'
-        ? await supabase.from('tasks').insert({ ...payload, created_by: developer?.id ?? null })
-        : await supabase.from('tasks').update(payload).eq('id', (editing as Task).id);
+    let res;
+    if (editing === 'new') {
+      if (!form.project_id) { setSaving(false); return setFormErr('请选择所属项目'); }
+      if (!form.start_date) { setSaving(false); return setFormErr('请选择开始日期'); }
+      if (!form.due_date) { setSaving(false); return setFormErr('请选择截止日期'); }
+      if (form.due_date < form.start_date) { setSaving(false); return setFormErr('截止日期不能早于开始日期'); }
+      const project = projects.find((p) => p.id === form.project_id);
+      res = await supabase.from('tasks').insert({
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        project_id: form.project_id,
+        developer_id: form.developer_id || null,
+        team_id: project?.team_id ?? null,
+        priority: form.priority,
+        start_date: form.start_date,
+        due_date: form.due_date,
+        created_by: developer?.id ?? null,
+      });
+    } else {
+      res = await supabase.from('tasks').update({
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+      }).eq('id', (editing as Task).id);
+    }
 
     setSaving(false);
     if (res.error) return setFormErr(res.error.message);
     setEditing(null);
-    load();
-  };
-
-  const removeTask = async (t: Task) => {
-    if (!window.confirm(`确认删除任务「${t.title}」？此操作不可恢复。`)) return;
-    const { error } = await supabase.from('tasks').delete().eq('id', t.id);
-    if (error) alert(error.message);
     load();
   };
 
@@ -347,6 +345,38 @@ export default function Tasks() {
   };
 
   const start = (t: Task) => updateStatus(t, { status: 'in_progress' });
+
+  const canLeadManage = (t: Task) => role === 'manager' && !!developer && !!t.developer_id && developerTeams.some((member) =>
+    member.developer_id === t.developer_id && teams.some((team) => team.id === member.team_id && team.leader_id === developer.id)
+  );
+  const openManage = (t: Task) => {
+    setManaging(t);
+    setManageForm({ developer_id: t.developer_id ?? '', start_date: t.start_date ?? todayStr(), due_date: t.due_date ?? todayStr(), priority: t.priority, reason: '' });
+    setManageErr('');
+  };
+  const saveManage = async () => {
+    if (!managing || !manageForm.reason.trim()) return setManageErr('请填写管理原因。');
+    if (manageForm.due_date < manageForm.start_date) return setManageErr('截止日期不能早于开始日期。');
+    setSaving(true); setManageErr('');
+    const { error } = isAdmin
+      ? await supabase.rpc('admin_manage_task', { p_task_id: managing.id, p_developer_id: manageForm.developer_id || null, p_team_id: managing.team_id, p_start_date: manageForm.start_date, p_due_date: manageForm.due_date, p_priority: manageForm.priority, p_reason: manageForm.reason.trim() })
+      : await supabase.rpc('lead_manage_task', { p_task_id: managing.id, p_developer_id: manageForm.developer_id || null, p_start_date: manageForm.start_date, p_due_date: manageForm.due_date, p_priority: manageForm.priority, p_reason: manageForm.reason.trim() });
+    setSaving(false);
+    if (error) return setManageErr(error.message);
+    setManaging(null); await load();
+  };
+
+  const adminActionName = (task: Task) => task.status === 'todo' ? 'start' : task.status === 'paused' ? 'resume' : task.status === 'in_progress' ? 'submit' : '';
+  const runAdminAction = async () => {
+    if (!adminAction || !adminActionReason.trim()) return;
+    const action = adminActionName(adminAction);
+    if (!action) return;
+    setSaving(true);
+    const { error } = await supabase.rpc('admin_execute_task_action', { p_task_id: adminAction.id, p_action: action, p_reason: adminActionReason.trim(), p_delay_note: null });
+    setSaving(false);
+    if (error) return setManageErr(error.message);
+    setAdminAction(null); setAdminActionReason(''); await load();
+  };
 
   const submitReview = (t: Task) => {
     const project = projects.find((p) => p.id === t.project_id);
@@ -452,6 +482,11 @@ export default function Tasks() {
   }));
   const projectOptions = projects.map((p) => ({ value: p.id, label: p.name }));
   const developerOptions = developers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }));
+  const managementDeveloperOptions = useMemo(() => {
+    if (isAdmin || !managing) return developerOptions;
+    const teamMemberIds = new Set(developerTeams.filter((member) => member.team_id === managing.team_id).map((member) => member.developer_id));
+    return developerOptions.filter((option) => teamMemberIds.has(option.value));
+  }, [developerOptions, developerTeams, isAdmin, managing]);
   const teamOptions = teams.map((t) => ({ value: t.id, label: t.name }));
 
   const withAll = (label: string, opts: { value: string; label: string }[]) => [
@@ -462,11 +497,7 @@ export default function Tasks() {
     <div>
       <PageHeader
         title="任务管理"
-        actions={
-          <button onClick={openCreate} className={`${btnPrimary} flex items-center gap-1.5`}>
-            <Plus size={16} /> 添加任务
-          </button>
-        }
+        actions={<div className="flex items-center gap-2"><button onClick={() => { const next = new URLSearchParams(searchParams); next.set('preset', 'pending_my_approval'); next.delete('page'); setSearchParams(next); }} className={btnGhost}>待我审批</button><button onClick={openCreate} className={`${btnPrimary} flex items-center gap-1.5`}><Plus size={16} /> 添加任务</button></div>}
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-3 text-sm">
@@ -655,16 +686,16 @@ export default function Tasks() {
                   <div className="flex flex-wrap items-center justify-end gap-1">
                     <IconBtn title="查看详情" onClick={() => openViewing(t)}><Eye size={15} /></IconBtn>
                     {/* 状态流转 */}
-                    {t.status === 'todo' && t.work_source === 'development' && t.task_type === 'dev' && (isMine(t) || isAdminOrManager) && (
+                    {t.status === 'todo' && t.work_source === 'development' && t.task_type === 'dev' && isMine(t) && (
                       <IconBtn title="开始" onClick={() => start(t)}><Play size={15} /></IconBtn>
                     )}
-                    {t.status === 'in_progress' && t.work_source === 'development' && t.task_type === 'dev' && (isMine(t) || isAdminOrManager) && (
+                    {t.status === 'in_progress' && t.work_source === 'development' && t.task_type === 'dev' && isMine(t) && (
                       <>
                         <IconBtn title={requiresProjectApproval(t) ? '完成并提交审批' : '完成任务'} onClick={() => submitReview(t)}><Send size={15} /></IconBtn>
                         <IconBtn title="挂起（被其他任务打断时）" onClick={() => setConfirmPause(t)}><Pause size={15} /></IconBtn>
                       </>
                     )}
-                    {t.status === 'paused' && t.work_source === 'development' && t.task_type === 'dev' && (isMine(t) || isAdminOrManager) && (
+                    {t.status === 'paused' && t.work_source === 'development' && t.task_type === 'dev' && isMine(t) && (
                       <IconBtn title="继续" onClick={() => start(t)}><Play size={15} /></IconBtn>
                     )}
                     {t.work_source === 'test_activity' && (
@@ -691,15 +722,18 @@ export default function Tasks() {
                         <IconBtn title="管理员异常代办驳回（必须填写原因）" tone="danger" onClick={() => openAdminReject(t)}><Undo2 size={15} /></IconBtn>
                       </>
                     )}
+                    {(canLeadManage(t) || isAdmin) && t.work_source === 'development' && !['review', 'testing', 'done', 'delayed_done'].includes(t.status) && (
+                      <IconBtn title={isAdmin ? '管理员异常调整（需原因）' : '本组改派/调整计划（需原因）'} onClick={() => openManage(t)}><Pencil size={15} /></IconBtn>
+                    )}
+                    {isAdmin && t.work_source === 'development' && !!adminActionName(t) && !isMine(t) && (
+                      <IconBtn title="管理员异常代执行（需原因）" tone="danger" onClick={() => { setAdminAction(t); setAdminActionReason(''); setManageErr(''); }}><ShieldAlert size={15} /></IconBtn>
+                    )}
                     {t.status === 'review' && t.project_id && !projects.find((p) => p.id === t.project_id)?.owner_id && (
                       <span className="text-xs text-red-600 dark:text-red-400">请先补项目负责人</span>
                     )}
                     {/* 编辑/删除 */}
                     {canEdit(t) && (
                       <IconBtn title="编辑" onClick={() => openEdit(t)}><Pencil size={15} /></IconBtn>
-                    )}
-                    {isAdminOrManager && t.work_source === 'development' && (
-                      <IconBtn title="删除" tone="danger" onClick={() => removeTask(t)}><Trash2 size={15} /></IconBtn>
                     )}
                     {(t.status === 'done' || t.status === 'delayed_done') && (
                       <span className="flex items-center gap-1 text-xs text-slate-500"><Lock size={13} /> 已完成</span>
@@ -777,6 +811,22 @@ export default function Tasks() {
             onOpenTask={openViewing}
           />
         )}
+      </Modal>
+
+      <Modal title={isAdmin ? '管理员异常调整任务' : '本组任务管理'} open={managing !== null} onClose={() => setManaging(null)}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">该入口只能改派负责人、计划日期和优先级，不会代替负责人执行任务；所有变更均写入审计。</p>
+          <div><label className={labelCls}>负责人</label><Select value={manageForm.developer_id} onChange={(developer_id) => setManageForm({ ...manageForm, developer_id })} options={[{ value: '', label: '暂不指定' }, ...managementDeveloperOptions]} /></div>
+          <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>开始日期</label><DatePicker value={manageForm.start_date} onChange={(start_date) => setManageForm({ ...manageForm, start_date })} /></div><div><label className={labelCls}>截止日期</label><DatePicker value={manageForm.due_date} onChange={(due_date) => setManageForm({ ...manageForm, due_date })} /></div></div>
+          <div><label className={labelCls}>优先级</label><Select value={manageForm.priority} onChange={(priority) => setManageForm({ ...manageForm, priority: priority as Priority })} options={priorityOptions} /></div>
+          <div><label className={labelCls}>调整原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-20 resize-none`} value={manageForm.reason} onChange={(event) => setManageForm({ ...manageForm, reason: event.target.value })} /></div>
+          {manageErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{manageErr}</div>}
+          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setManaging(null)}>取消</button><button className={btnPrimary} disabled={saving || !manageForm.reason.trim()} onClick={saveManage}>确认调整</button></div>
+        </div>
+      </Modal>
+
+      <Modal title="管理员异常代执行" open={adminAction !== null} onClose={() => setAdminAction(null)}>
+        <div className="space-y-4"><p className="text-sm text-slate-500">仅用于异常兜底，将记录代执行原因；普通执行仍只能由任务负责人完成。</p><div><label className={labelCls}>异常原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-20 resize-none`} value={adminActionReason} onChange={(event) => setAdminActionReason(event.target.value)} /></div>{manageErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{manageErr}</div>}<div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setAdminAction(null)}>取消</button><button className={btnPrimary} disabled={saving || !adminActionReason.trim()} onClick={runAdminAction}>确认执行</button></div></div>
       </Modal>
 
       {/* 审批通过：先核对完整任务详情，再执行不可逆的完成动作 */}
@@ -867,6 +917,8 @@ export default function Tasks() {
             />
             <TextCounter value={form.title} max={TASK_TITLE_MAX} />
           </div>
+          {editing === 'new' ? (
+            <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls}>所属项目 <span className="text-red-600 dark:text-red-400">*</span></label>
@@ -918,6 +970,18 @@ export default function Tasks() {
             <p className="-mt-2 text-xs text-slate-500">
               计划工期：{planDays(form.start_date || null, form.due_date || null)} 天
             </p>
+          )}
+            </>
+          ) : (
+            <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div><div className="text-xs text-slate-500">所属项目</div><div className="mt-1 font-medium">{projectName(form.project_id)}</div></div>
+                <div><div className="text-xs text-slate-500">负责人</div><div className="mt-1 font-medium">{devName(form.developer_id || null)}</div></div>
+                <div><div className="text-xs text-slate-500">优先级</div><div className="mt-1 font-medium">{PRIORITY_LABEL[form.priority]}</div></div>
+                <div><div className="text-xs text-slate-500">计划日期</div><div className="mt-1 font-medium">{form.start_date || '—'} ~ {form.due_date || '—'}</div></div>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">项目、负责人、优先级和计划日期由“本组任务管理”入口调整。</p>
+            </div>
           )}
           <div>
             <label className={labelCls}>描述</label>

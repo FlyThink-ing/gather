@@ -10,9 +10,9 @@ import {
   FlaskConical,
   Gauge,
   Pencil,
+  Pause,
   Plus,
   ShieldAlert,
-  Trash2,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -41,7 +41,6 @@ const STATUS_CLS: Record<ProjectStatus, string> = {
 interface ProjectForm {
   name: string;
   description: string;
-  status: ProjectStatus;
   team_id: string;
   owner_id: string;
   start_date: string;
@@ -49,7 +48,7 @@ interface ProjectForm {
 }
 
 const emptyForm: ProjectForm = {
-  name: '', description: '', status: 'active', team_id: '', owner_id: '', start_date: '', end_date: '',
+  name: '', description: '', team_id: '', owner_id: '', start_date: '', end_date: '',
 };
 
 const pct = (value: number | null) => value == null ? '—' : `${value}%`;
@@ -73,6 +72,11 @@ export default function Projects() {
   const [forceReason, setForceReason] = useState('');
   const [forceErr, setForceErr] = useState('');
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [adminEditReason, setAdminEditReason] = useState('');
+  const [governing, setGoverning] = useState<ProjectSummary | null>(null);
+  const [governance, setGovernance] = useState({ team_id: '', owner_id: '', reason: '' });
+  const [transitioning, setTransitioning] = useState<ProjectSummary | null>(null);
+  const [transitionReason, setTransitionReason] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,8 +104,8 @@ export default function Projects() {
 
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? '-';
   const devName = (id: string | null) => developers.find((d) => d.id === id)?.name ?? '待指定';
-  const canEditProject = (p: Project) =>
-    role === 'admin' || role === 'manager' || (!!developer && p.owner_id === developer.id);
+  const isOwner = (p: Project) => !!developer && p.owner_id === developer.id;
+  const canEditProject = (p: Project) => isOwner(p) || role === 'admin';
   const canCompleteProject = (p: Project) =>
     p.status !== 'completed' && (role === 'admin' || (!!developer && p.owner_id === developer.id));
 
@@ -110,6 +114,7 @@ export default function Projects() {
     [teams, developer]
   );
   const selectableTeams = role === 'admin' ? teams : myLeaderTeams;
+  const canGovernProject = (p: Project) => role === 'admin' || (role === 'manager' && myLeaderTeams.some((team) => team.id === p.team_id));
 
   const openCreate = () => {
     const auto = role === 'manager' && myLeaderTeams.length === 1 ? myLeaderTeams[0].id : '';
@@ -122,41 +127,63 @@ export default function Projects() {
     setForm({
       name: p.name,
       description: p.description ?? '',
-      status: p.status,
       team_id: p.team_id,
       owner_id: p.owner_id ?? '',
       start_date: p.start_date ?? '',
       end_date: p.end_date ?? '',
     });
     setFormErr('');
+    setAdminEditReason('');
     setEditing(p);
   };
 
   const save = async () => {
     if (!form.name.trim()) return setFormErr('请填写项目名称');
-    if (!form.team_id) return setFormErr('请选择所属小组（项目必须归属一个小组）');
-    if (!form.owner_id) return setFormErr('请指定项目负责人');
+    if (editing === 'new' && !form.team_id) return setFormErr('请选择所属小组（项目必须归属一个小组）');
+    if (editing === 'new' && !form.owner_id) return setFormErr('请指定项目负责人');
     if (form.start_date && form.end_date && form.end_date < form.start_date) {
       return setFormErr('结束日期不能早于开始日期');
     }
     setSaving(true);
     setFormErr('');
-    const payload = {
+    const businessPayload = {
       name: form.name.trim(),
       description: form.description.trim() || null,
-      status: form.status,
-      team_id: form.team_id,
-      owner_id: form.owner_id,
       start_date: form.start_date || null,
       end_date: form.end_date || null,
     };
     const res = editing === 'new'
-      ? await supabase.from('projects').insert({ ...payload, status: 'active', created_by: developer?.id ?? null })
-      : await supabase.from('projects').update(payload).eq('id', (editing as Project).id);
+      ? await supabase.from('projects').insert({ ...businessPayload, team_id: form.team_id, owner_id: form.owner_id, status: 'active', created_by: developer?.id ?? null })
+      : role === 'admin' && !isOwner(editing as Project)
+        ? await supabase.rpc('admin_update_project_business', { p_project_id: (editing as Project).id, p_name: businessPayload.name, p_description: businessPayload.description, p_start_date: businessPayload.start_date, p_end_date: businessPayload.end_date, p_reason: adminEditReason.trim() })
+        : await supabase.rpc('update_project_business', { p_project_id: (editing as Project).id, p_name: businessPayload.name, p_description: businessPayload.description, p_start_date: businessPayload.start_date, p_end_date: businessPayload.end_date });
     setSaving(false);
     if (res.error) return setFormErr(res.error.message);
     setEditing(null);
     load();
+  };
+
+  const saveGovernance = async () => {
+    if (!governing || !governance.team_id || !governance.owner_id || !governance.reason.trim()) return;
+    setSaving(true);
+    const { error } = await supabase.rpc('change_project_governance', {
+      p_project_id: governing.id, p_team_id: governance.team_id, p_owner_id: governance.owner_id, p_reason: governance.reason.trim(),
+    });
+    setSaving(false);
+    if (error) return setFormErr(error.message);
+    setGoverning(null); setFormErr(''); load();
+  };
+
+  const runTransition = async () => {
+    if (!transitioning) return;
+    const action = transitioning.status === 'active' ? 'pause' : 'resume';
+    const needsReason = role === 'admin' && !isOwner(transitioning);
+    if (needsReason && !transitionReason.trim()) return;
+    setSaving(true);
+    const { error } = await supabase.rpc('transition_project', { p_project_id: transitioning.id, p_action: action, p_reason: transitionReason.trim() || null });
+    setSaving(false);
+    if (error) return setFormErr(error.message);
+    setTransitioning(null); setTransitionReason(''); setFormErr(''); load();
   };
 
   const completeProject = async (p: ProjectSummary, force = false, reason = '') => {
@@ -181,15 +208,6 @@ export default function Projects() {
     setForceFor(null);
     setForceReason('');
     setForceErr('');
-    load();
-  };
-
-  const remove = async (p: ProjectSummary) => {
-    const blockers = p.unfinished_dev_count + p.active_test_count;
-    const warn = blockers > 0 ? `\n注意：项目仍有 ${blockers} 个未完成开发/测试任务。` : '';
-    if (!window.confirm(`确认删除项目「${p.name}」？${warn}`)) return;
-    const { error } = await supabase.from('projects').delete().eq('id', p.id);
-    if (error) window.alert(error.message);
     load();
   };
 
@@ -279,9 +297,14 @@ export default function Projects() {
                       <Pencil size={15} />
                     </button>
                   )}
-                  {(role === 'admin' || role === 'manager') && (
-                    <button onClick={() => remove(p)} className="rounded-lg p-2 text-red-600 hover:bg-red-500/10" title="删除">
-                      <Trash2 size={15} />
+                  {canGovernProject(p) && (
+                    <button onClick={() => { setGoverning(p); setGovernance({ team_id: p.team_id, owner_id: p.owner_id ?? '', reason: '' }); setFormErr(''); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" title="调整归属与负责人">
+                      <Users size={15} />
+                    </button>
+                  )}
+                  {(isOwner(p) || role === 'admin') && p.status !== 'completed' && (
+                    <button onClick={() => { setTransitioning(p); setTransitionReason(''); setFormErr(''); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" title={p.status === 'active' ? '暂停项目' : '恢复项目'}>
+                      <Pause size={15} />
                     </button>
                   )}
                 </div>
@@ -343,22 +366,11 @@ export default function Projects() {
             <label className={labelCls}>项目名称 <span className="text-red-500">*</span></label>
             <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
+          {editing === 'new' ? <>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>所属小组 <span className="text-red-500">*</span></label>
               <Select value={form.team_id} onChange={(v) => setForm({ ...form, team_id: v })} options={editTeamOptions.map((t) => ({ value: t.id, label: t.name }))} placeholder="请选择小组" />
-            </div>
-            <div>
-              <label className={labelCls}>状态</label>
-              <Select
-                value={form.status}
-                onChange={(v) => setForm({ ...form, status: v as ProjectStatus })}
-                options={(editing !== 'new' && (editing as Project)?.status === 'completed'
-                  ? ['completed', 'active', 'paused'] as ProjectStatus[]
-                  : ['active', 'paused'] as ProjectStatus[]
-                ).map((s) => ({ value: s, label: PROJECT_STATUS_LABEL[s] }))}
-              />
-              {form.status !== 'completed' && <p className="mt-1 text-xs text-slate-500">完成项目请使用独立操作，系统会先检查阻断项。</p>}
             </div>
           </div>
           <div>
@@ -371,13 +383,37 @@ export default function Projects() {
             />
             <p className="mt-1 text-xs text-slate-500">当前负责人是本项目全部开发任务的唯一普通审批人。</p>
           </div>
+          </> : (
+            <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">小组、项目负责人和状态由“调整归属与负责人”及暂停/恢复/完成专用操作维护，普通编辑不会变更这些治理字段。</div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div><label className={labelCls}>计划开始</label><DatePicker value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} /></div>
             <div><label className={labelCls}>计划结束</label><DatePicker value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} /></div>
           </div>
           <div><label className={labelCls}>描述</label><textarea className={`${inputCls} h-24 resize-none`} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+          {editing !== 'new' && role === 'admin' && !isOwner(editing as Project) && <div><label className={labelCls}>异常编辑原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-20 resize-none`} value={adminEditReason} onChange={(e) => setAdminEditReason(e.target.value)} /></div>}
           {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">{formErr}</div>}
-          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setEditing(null)}>取消</button><button className={btnPrimary} disabled={saving} onClick={save}>{saving ? '保存中…' : '保存'}</button></div>
+          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setEditing(null)}>取消</button><button className={btnPrimary} disabled={saving || (editing !== 'new' && role === 'admin' && !isOwner(editing as Project) && !adminEditReason.trim())} onClick={save}>{saving ? '保存中…' : '保存'}</button></div>
+        </div>
+      </Modal>
+
+      <Modal title="调整项目归属与负责人" open={governing !== null} onClose={() => setGoverning(null)}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">这是治理操作，会保留审计记录；不会通过普通项目编辑完成。</p>
+          <div><label className={labelCls}>所属小组 *</label><Select value={governance.team_id} onChange={(team_id) => setGovernance({ ...governance, team_id })} options={(role === 'admin' ? teams : myLeaderTeams).map((team) => ({ value: team.id, label: team.name }))} /></div>
+          <div><label className={labelCls}>项目负责人 *</label><Select value={governance.owner_id} onChange={(owner_id) => setGovernance({ ...governance, owner_id })} options={developers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))} /></div>
+          <div><label className={labelCls}>调整原因 *</label><textarea className={`${inputCls} h-20 resize-none`} value={governance.reason} onChange={(e) => setGovernance({ ...governance, reason: e.target.value })} /></div>
+          {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{formErr}</div>}
+          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setGoverning(null)}>取消</button><button className={btnPrimary} disabled={saving || !governance.reason.trim()} onClick={saveGovernance}>确认调整</button></div>
+        </div>
+      </Modal>
+
+      <Modal title={transitioning?.status === 'active' ? '暂停项目' : '恢复项目'} open={transitioning !== null} onClose={() => setTransitioning(null)}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">项目状态只能通过此专用流程变更。</p>
+          {role === 'admin' && transitioning && !isOwner(transitioning) && <div><label className={labelCls}>异常操作原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-20 resize-none`} value={transitionReason} onChange={(e) => setTransitionReason(e.target.value)} /></div>}
+          {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{formErr}</div>}
+          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setTransitioning(null)}>取消</button><button className={btnPrimary} disabled={saving || (role === 'admin' && !!transitioning && !isOwner(transitioning) && !transitionReason.trim())} onClick={runTransition}>确认</button></div>
         </div>
       </Modal>
 

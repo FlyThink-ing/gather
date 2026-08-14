@@ -13,7 +13,7 @@
 type Row = Record<string, any>;
 type Store = Record<string, Row[]>;
 
-const STORE_KEY = 'gather-demo-store-v11';
+const STORE_KEY = 'gather-demo-store-v12';
 const SESSION_KEY = 'gather-demo-session-v1';
 export const DEMO_USER_ID = 'demo-user-0001';
 const DEMO_DEV_ID = 'd0';
@@ -66,7 +66,10 @@ const TABLE_DEFAULTS: Record<string, Row> = {
   developers: { user_id: null, position: null, is_active: true },
   teams: { leader_id: null, is_test_team: false },
   task_comments: {},
-  task_work_segments: { developer_id: null, ended_at: null, entry_source: 'automatic', note: null, created_by: null },
+  task_work_segments: {
+    developer_id: null, ended_at: null, entry_source: 'automatic', note: null, created_by: null,
+    voided_at: null, voided_by: null, void_reason: null, updated_at: null,
+  },
   test_rounds: {
     test_method: 'case_based',
     result: null,
@@ -85,6 +88,9 @@ const TABLE_DEFAULTS: Record<string, Row> = {
   },
   task_approval_audits: {},
   project_status_events: {},
+  project_admin_action_audits: {},
+  task_management_audits: {},
+  task_work_segment_audits: {},
   test_plans: {},
   test_cycles: {},
   test_cycle_scope_tasks: {},
@@ -344,6 +350,10 @@ function seed(): Store {
     preconditions: '设备和 V3.2 构建可用', expected_deliverable: '执行批次与兼容性结论',
     status: 'done', task_id: 'tk-external-activity-demo', created_by: 'd10', created_at: day(-9), updated_at: day(-6),
   }];
+  const test_activity_participants: Row[] = [
+    { id: uuid(), activity_id: 'ta-demo', developer_id: 'd11', planned_hours: 24, created_at: now() },
+    { id: uuid(), activity_id: 'ta-ext-demo', developer_id: 'd10', planned_hours: 8, created_at: now() },
+  ];
   const test_execution_batches: Row[] = [{
     id: 'tb-demo', cycle_id: 'tc-demo', activity_id: 'ta-demo', executed_on: day(-1),
     executor_id: 'd11', environment_name: 'EHC 测试环境', build_version: 'R2-build-07',
@@ -420,7 +430,7 @@ function seed(): Store {
     test_cycle_scope_tasks,
     test_cycle_participants,
     test_activities,
-    test_activity_participants: [],
+    test_activity_participants,
     test_execution_batches,
     test_execution_batch_audits: [],
     test_reports,
@@ -437,6 +447,9 @@ function seed(): Store {
       to_status: project.status, actor_id: DEMO_DEV_ID, actor_name: '演示管理员', actor_role: 'admin',
       is_admin_force: false, reason: null, blocker_snapshot: {}, created_at: project.created_at,
     })),
+    project_admin_action_audits: [],
+    task_management_audits: [],
+    task_work_segment_audits: [],
     notifications,
   };
 }
@@ -489,6 +502,30 @@ export function createDemoClient() {
   const applyTaskRules = (old: Row, patch: Row): { patch?: Row; error?: string } => {
     const p = { ...patch };
     const next = p.status ?? old.status;
+    const changedKeys = Object.keys(p).filter((key) => key !== 'updated_at' && p[key] !== old[key]);
+    const onlyChanges = (...allowed: string[]) => changedKeys.every((key) => allowed.includes(key));
+
+    // 0012 P0：普通更新必须服从显式状态机和字段白名单。
+    if (old.status === 'review') {
+      if (next === 'review' && changedKeys.length) return { error: '审核中的任务已锁定，只能审批或驳回' };
+      if (['done', 'delayed_done'].includes(next) && !onlyChanges('status')) return { error: '审批只能修改任务状态' };
+      if (next === 'in_progress' && !onlyChanges('status', 'reject_note')) return { error: '驳回只能修改状态和驳回原因' };
+      if (!['review', 'done', 'delayed_done', 'in_progress'].includes(next)) return { error: '审核任务只能审批完成或驳回到进行中' };
+    } else {
+      if (['testing', 'done', 'delayed_done'].includes(old.status)) return { error: '测试中和终态任务禁止普通修改' };
+      if (next !== old.status) {
+        const legal =
+          (old.status === 'todo' && next === 'in_progress' && onlyChanges('status'))
+          || (old.status === 'in_progress' && next === 'paused' && onlyChanges('status'))
+          || (old.status === 'in_progress' && ['review', 'done', 'delayed_done'].includes(next) && onlyChanges('status', 'delay_note'))
+          || (old.status === 'paused' && next === 'in_progress' && onlyChanges('status'));
+        if (!legal) return { error: `非法任务状态流转：${old.status} → ${next}` };
+      } else if (old.status === 'in_progress') {
+        if (!onlyChanges('title', 'description', 'delay_note')) return { error: '进行中任务仅允许编辑标题、描述和延期原因' };
+      } else if (!onlyChanges('title', 'description')) {
+        return { error: '待处理或挂起任务仅允许编辑标题和描述' };
+      }
+    }
 
     // 1) 离开 review：当前 projects.owner_id 是唯一普通审批来源。
     if (old.status === 'review' && next !== 'review') {
@@ -677,6 +714,43 @@ export function createDemoClient() {
         // 模拟数据库列默认值（真实库由 DEFAULT 子句处理）
         const defaults: Row = TABLE_DEFAULTS[this.table] ?? {};
         const row: Row = { id: uuid(), created_at: now(), updated_at: now(), ...defaults, ...this.payload };
+        if (this.table === 'tasks') {
+          const protectedLinks = [
+            row.linked_task_id, row.test_result, row.test_note, row.test_plan_id,
+            row.test_cycle_id, row.test_activity_id, row.construction_work_id, row.construction_task_id,
+          ];
+          if (row.task_type !== 'dev' || row.work_source !== 'development' || protectedLinks.some((value) => value != null)) {
+            return { data: null, error: { message: '测试活动和测试建设任务只能通过测试中心专用流程创建' } };
+          }
+
+          const role = store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
+          const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
+          const managedDeveloperIds = new Set(
+            store.developer_teams.filter((member) => ledTeamIds.has(member.team_id)).map((member) => member.developer_id),
+          );
+          const canAssign = row.developer_id === DEMO_DEV_ID || (role === 'manager' && managedDeveloperIds.has(row.developer_id));
+          const project = row.project_id ? store.projects.find((item) => item.id === row.project_id) : null;
+          const canViewProject = !row.project_id || !!project && (
+            project.owner_id === DEMO_DEV_ID
+            || ledTeamIds.has(project.team_id)
+            || store.tasks.some((task) => task.project_id === project.id && (
+              task.developer_id === DEMO_DEV_ID || managedDeveloperIds.has(task.developer_id)
+            ))
+            || store.test_plans.some((plan) => plan.project_id === project.id && (
+              plan.created_by === DEMO_DEV_ID
+              || store.test_cycles.some((cycle) => cycle.plan_id === plan.id && (
+                cycle.main_tester_id === DEMO_DEV_ID
+                || store.test_cycle_participants.some((participant) => participant.cycle_id === cycle.id && participant.developer_id === DEMO_DEV_ID)
+              ))
+            ))
+          );
+          if (role !== 'admin' && !canAssign) {
+            return { data: null, error: { message: '只能为本人或所带小组的有效成员创建开发任务' } };
+          }
+          if (role !== 'admin' && !canViewProject) {
+            return { data: null, error: { message: '无权在不可见项目下创建任务' } };
+          }
+        }
         rows.push(row);
         if (this.table === 'tasks' && row.developer_id && row.developer_id !== row.created_by) {
           notify(row.developer_id, 'task_assigned', { task_id: row.id, title: row.title });
@@ -794,14 +868,17 @@ export function createDemoClient() {
     if (!from || !to || to.slice(0, 10) < from.slice(0, 10)) return null;
     return Math.round((new Date(to.slice(0, 10)).getTime() - new Date(from.slice(0, 10)).getTime()) / 86400000) + 1;
   };
-  const segmentHours = (segment: Row) => Math.max(0, (new Date(segment.ended_at ?? now()).getTime() - new Date(segment.started_at).getTime()) / 3600000);
+  const segmentHours = (segment: Row) => {
+    if (!segment.ended_at || segment.voided_at) return 0;
+    return Math.max(0, (new Date(segment.ended_at).getTime() - new Date(segment.started_at).getTime()) / 3600000);
+  };
   const taskHours = (taskId: string) => (store.task_work_segments ?? [])
-    .filter((segment) => segment.task_id === taskId)
+    .filter((segment) => segment.task_id === taskId && segment.ended_at && !segment.voided_at)
     .reduce((sum, segment) => sum + segmentHours(segment), 0);
   const taskDayCount = (taskId: string) => {
     const days = new Set<string>();
-    for (const segment of (store.task_work_segments ?? []).filter((item) => item.task_id === taskId)) {
-      const end = (segment.ended_at ?? now()).slice(0, 10);
+    for (const segment of (store.task_work_segments ?? []).filter((item) => item.task_id === taskId && item.ended_at && !item.voided_at)) {
+      const end = segment.ended_at.slice(0, 10);
       const cursor = new Date(segment.started_at.slice(0, 10));
       for (let i = 0; i < 3660 && cursor.toISOString().slice(0, 10) <= end; i += 1) {
         days.add(cursor.toISOString().slice(0, 10));
@@ -968,11 +1045,38 @@ export function createDemoClient() {
 
   // ---------- RPC 镜像（0003/0004 的测试流程）----------
   // 状态更新通过 Query 走 applyTaskRules，与真实端"RPC 内 update 触发触发器"一致
-  const rpc = async (name: string, params: Record<string, any> = {}) => {
+  const rpc = async (name: string, params: Record<string, any> = {}): Promise<{ data: any; error: { message: string } | null }> => {
     const err = (message: string) => ({ data: null, error: { message } });
 
-    const cycleDetail = (cycle: Row): Row => ({
-      ...cycle,
+    const canCorrectTestWorkEntry = (segment: Row): boolean => {
+      const task = store.tasks.find((item) => item.id === segment.task_id);
+      if (!task || !segment.ended_at || segment.voided_at || !['test_activity', 'construction'].includes(task.work_source)) return false;
+      const role = store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
+      if (role === 'admin') return true;
+      const plan = task.test_plan_id ? store.test_plans.find((item) => item.id === task.test_plan_id) : null;
+      const isTestLead = store.teams.some((team) => team.is_test_team && team.leader_id === DEMO_DEV_ID && (
+        task.work_source === 'construction' || team.id === plan?.test_team_id
+      ));
+      const cycle = task.test_cycle_id ? store.test_cycles.find((item) => item.id === task.test_cycle_id) : null;
+      const work = task.construction_work_id ? store.test_construction_works.find((item) => item.id === task.construction_work_id) : null;
+      const terminal = ['done', 'delayed_done'].includes(task.status)
+        || !!cycle && ['passed', 'failed', 'cancelled'].includes(cycle.status)
+        || !!work && ['completed', 'cancelled'].includes(work.status);
+      if (terminal || segment.entry_source === 'automatic') return isTestLead;
+      return segment.entry_source === 'manual'
+        && ['in_progress', 'paused'].includes(task.status)
+        && segment.developer_id === DEMO_DEV_ID;
+    };
+
+    const cycleDetail = (cycle: Row): Row => {
+      const cycleActivities = (store.test_activities ?? []).filter((x) => x.cycle_id === cycle.id);
+      const activityIds = new Set(cycleActivities.map((x) => x.id));
+      const plannedHours = (store.test_activity_participants ?? [])
+        .filter((x) => activityIds.has(x.activity_id))
+        .reduce((sum, x) => sum + Number(x.planned_hours ?? 0), 0);
+      const actualHours = cycleActivities.reduce((sum, x) => sum + (x.task_id ? taskHours(x.task_id) : 0), 0);
+      return ({
+      ...cycle, planned_hours: oneDecimal(plannedHours), actual_hours: oneDecimal(actualHours),
       main_tester_name: store.developers.find((d) => d.id === cycle.main_tester_id)?.name ?? null,
       scope_tasks: (store.test_cycle_scope_tasks ?? []).filter((x) => x.cycle_id === cycle.id),
       participants: (store.test_cycle_participants ?? []).filter((x) => x.cycle_id === cycle.id).map((x) => ({
@@ -982,6 +1086,13 @@ export function createDemoClient() {
         ...x,
         owner_name: store.developers.find((d) => d.id === x.owner_id)?.name ?? '未知人员',
         actual_hours: x.task_id ? oneDecimal(taskHours(x.task_id)) : 0,
+        participants: (store.test_activity_participants ?? [])
+          .filter((item) => item.activity_id === x.id)
+          .map((item) => ({
+            developer_id: item.developer_id,
+            name: store.developers.find((d) => d.id === item.developer_id)?.name ?? '未知人员',
+            planned_hours: Number(item.planned_hours ?? 0),
+          })),
       })),
       batches: (store.test_execution_batches ?? []).filter((x) => x.cycle_id === cycle.id).map((x): Row => ({
         ...x, executor_name: store.developers.find((d) => d.id === x.executor_id)?.name ?? '未知人员',
@@ -992,14 +1103,20 @@ export function createDemoClient() {
         return { ...x, repair_task_title: repair?.title ?? '任务已删除', repair_task_status: repair?.status ?? null };
       }),
     });
+    };
 
     const testPlanSummary = (plan: Row): Row => {
       const project = store.projects.find((p) => p.id === plan.project_id);
       const team = store.teams.find((t) => t.id === plan.test_team_id);
       const cycles = (store.test_cycles ?? []).filter((c) => c.plan_id === plan.id).sort((a, b) => b.cycle_no - a.cycle_no);
       const cycle = cycles[0] ?? {};
-      const batches = (store.test_execution_batches ?? []).filter((b) => b.cycle_id === cycle.id);
-      const activities = (store.test_activities ?? []).filter((a) => a.cycle_id === cycle.id);
+      const cycleIds = new Set(cycles.map((item) => item.id));
+      const batches = (store.test_execution_batches ?? []).filter((b) => cycleIds.has(b.cycle_id));
+      const activities = (store.test_activities ?? []).filter((a) => cycleIds.has(a.cycle_id));
+      const activityIds = new Set(activities.map((item) => item.id));
+      const plannedHours = (store.test_activity_participants ?? [])
+        .filter((item) => activityIds.has(item.activity_id))
+        .reduce((total, item) => total + Number(item.planned_hours ?? 0), 0);
       const sum = (key: string) => batches.reduce((total, row) => total + Number(row[key] ?? 0), 0);
       return {
         ...plan, project_name: project?.name ?? null, test_team_name: team?.name ?? null,
@@ -1012,6 +1129,7 @@ export function createDemoClient() {
         planned_case_count: sum('planned_count'), executed_case_count: sum('executed_count'),
         passed_count: sum('passed_count'), failed_count: sum('failed_count'),
         blocked_count: sum('blocked_count'), bug_count: sum('bug_count'), reopen_count: sum('reopen_count'),
+        planned_hours: oneDecimal(plannedHours),
         actual_hours: oneDecimal(activities.reduce((total, item) => total + (item.task_id ? taskHours(item.task_id) : 0), 0)),
       };
     };
@@ -1046,13 +1164,18 @@ export function createDemoClient() {
           && task.completed_at
           && task.approved_by_user
           && !covered.has(task.id)).length;
+        const devTasks = store.tasks.filter((task) => task.project_id === project.id && task.task_type === 'dev');
+        const hasUnreadyTask = devTasks.some((task) => !['done', 'delayed_done'].includes(task.status) || !task.completed_at || !task.approved_by_user);
         return {
           project,
           activeCycle,
           eligibleTaskCount,
+          hasUnreadyTask,
           eligible: project.status === 'active'
             && project.no_test_status !== 'approved'
             && !activeCycle
+            && devTasks.length > 0
+            && !hasUnreadyTask
             && eligibleTaskCount > 0,
         };
       });
@@ -1074,7 +1197,7 @@ export function createDemoClient() {
           inactive_count: assessed.filter((item) => item.project.status !== 'active').length,
           no_test_approved_count: assessed.filter((item) => item.project.no_test_status === 'approved').length,
           active_cycle_count: assessed.filter((item) => item.activeCycle).length,
-          no_eligible_task_count: assessed.filter((item) => item.eligibleTaskCount === 0).length,
+          no_eligible_task_count: assessed.filter((item) => item.eligibleTaskCount === 0 || item.hasUnreadyTask).length,
         },
         error: null,
       };
@@ -1141,6 +1264,8 @@ export function createDemoClient() {
     if (name === 'get_test_resource_summary') {
       const rows = new Map<string, Row>();
       const assignments: Row[] = [];
+      const fromMs = params.p_from ? new Date(`${params.p_from}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+      const toMs = params.p_to ? new Date(`${params.p_to}T00:00:00`).getTime() + 86400000 : Number.POSITIVE_INFINITY;
       const add = (developerId: string, source: string, planned: number, actual: number) => {
         const key = `${developerId}:${source}`;
         const developerRow = store.developers.find((d) => d.id === developerId);
@@ -1149,26 +1274,32 @@ export function createDemoClient() {
         row.actual_hours += actual;
         rows.set(key, row);
       };
-      for (const participant of store.test_cycle_participants ?? []) {
-        const cycle = store.test_cycles.find((x) => x.id === participant.cycle_id);
+      for (const participant of store.test_activity_participants ?? []) {
+        const activity = store.test_activities.find((x) => x.id === participant.activity_id);
+        const cycle = store.test_cycles.find((x) => x.id === activity?.cycle_id);
         const plan = store.test_plans.find((x) => x.id === cycle?.plan_id);
-        if (plan) {
+        if (plan && activity && (!params.p_from || activity.planned_end >= params.p_from) && (!params.p_to || activity.planned_start <= params.p_to)) {
           add(participant.developer_id, plan.source, Number(participant.planned_hours ?? 0), 0);
-          if (cycle?.planned_start && cycle?.planned_end) assignments.push({ developer_id: participant.developer_id, id: `cycle:${cycle.id}`, start: cycle.planned_start, end: cycle.planned_end });
+          assignments.push({ developer_id: participant.developer_id, id: `activity:${activity.id}`, start: activity.planned_start, end: activity.planned_end });
         }
       }
-      for (const participant of store.test_construction_participants ?? []) {
-        add(participant.developer_id, 'construction', Number(participant.planned_hours ?? 0), 0);
-        const work = store.test_construction_works.find((x) => x.id === participant.work_id);
-        if (work?.planned_start && work?.planned_end) assignments.push({ developer_id: participant.developer_id, id: `construction:${work.id}`, start: work.planned_start, end: work.planned_end });
+      for (const constructionTask of store.test_construction_tasks ?? []) {
+        const work = store.test_construction_works.find((x) => x.id === constructionTask.work_id);
+        if (work && (!params.p_from || constructionTask.planned_end >= params.p_from) && (!params.p_to || constructionTask.planned_start <= params.p_to)) {
+          add(constructionTask.owner_id, 'construction', Number(constructionTask.planned_hours ?? 0), 0);
+          assignments.push({ developer_id: constructionTask.owner_id, id: `construction-task:${constructionTask.id}`, start: constructionTask.planned_start, end: constructionTask.planned_end });
+        }
       }
       for (const segment of store.task_work_segments ?? []) {
-        if (!segment.ended_at) continue;
+        if (!segment.ended_at || segment.voided_at) continue;
         const task = store.tasks.find((x) => x.id === segment.task_id);
         if (!task || !['test_activity', 'construction'].includes(task.work_source)) continue;
+        const overlapStart = Math.max(new Date(segment.started_at).getTime(), fromMs);
+        const overlapEnd = Math.min(new Date(segment.ended_at).getTime(), toMs);
+        if (overlapEnd <= overlapStart) continue;
         const plan = store.test_plans.find((x) => x.id === task.test_plan_id);
         const source = task.work_source === 'construction' ? 'construction' : (plan?.source ?? 'internal_project');
-        add(segment.developer_id, source, 0, segmentHours(segment));
+        add(segment.developer_id, source, 0, (overlapEnd - overlapStart) / 3600000);
       }
       const conflictCount = (developerId: string) => {
         const own = assignments.filter((item) => item.developer_id === developerId);
@@ -1183,7 +1314,8 @@ export function createDemoClient() {
         conflict_count: conflictCount(row.developer_id),
       }));
       const actualTotal = (source: string) => oneDecimal(resultRows.filter((row) => row.source === source).reduce((sum, row) => sum + row.actual_hours, 0));
-      return { data: { rows: resultRows, totals: { internal_project: actualTotal('internal_project'), external_request: actualTotal('external_request'), construction: actualTotal('construction'), project_test_cost: actualTotal('internal_project') } }, error: null };
+      const allSources = oneDecimal(resultRows.reduce((sum, row) => sum + row.actual_hours, 0));
+      return { data: { rows: resultRows, totals: { internal_project: actualTotal('internal_project'), external_request: actualTotal('external_request'), construction: actualTotal('construction'), all_sources: allSources } }, error: null };
     }
 
     if (name === 'get_project_test_summary') {
@@ -1211,6 +1343,23 @@ export function createDemoClient() {
       };
     }
 
+    if (name === 'admin_create_internal_test_plan') {
+      const reason = String(params.p_reason ?? '').trim();
+      const project = store.projects.find((item) => item.id === params.p_project_id);
+      if (!reason) return err('管理员异常代办必须填写原因');
+      if (!project) return err('内部项目不存在');
+      const originalOwner = project.owner_id;
+      project.owner_id = DEMO_DEV_ID;
+      const result: { data: any; error: { message: string } | null } = await rpc('create_test_plan', {
+        ...params, p_source: 'internal_project', p_external_project_name: null, p_external_owner_name: null,
+      });
+      project.owner_id = originalOwner;
+      if (!result.error && result.data) {
+        store.test_plan_events.push({ id: uuid(), plan_id: result.data, cycle_id: null, event_type: 'admin_proxy_created', actor_id: DEMO_DEV_ID, reason, payload: { project_id: project.id }, created_at: now() });
+      }
+      save(); return result;
+    }
+
     if (name === 'create_test_plan') {
       if (!String(params.p_title ?? '').trim() || !String(params.p_test_scope ?? '').trim() || !String(params.p_test_goal ?? '').trim()) return err('计划名称、测试范围和测试目标必填');
       const source = params.p_source;
@@ -1228,6 +1377,11 @@ export function createDemoClient() {
           return plan?.project_id === project.id && !['passed', 'failed', 'cancelled', 'returned'].includes(cycle.status);
         });
         if (hasActiveCycle) return err('该项目已有未结束的测试轮次');
+        const projectDevTasks = store.tasks.filter((task) => task.project_id === project.id && task.task_type === 'dev');
+        if (!projectDevTasks.length || projectDevTasks.some((task) =>
+          !['done', 'delayed_done'].includes(task.status) || !task.completed_at || !task.approved_by_user)) {
+          return err('整项目范围内全部开发/修复任务必须审批完成后才能提测');
+        }
         const covered = new Set(store.test_cycle_scope_tasks.filter((scope) => {
           const coveredCycle = store.test_cycles.find((cycle) => cycle.id === scope.cycle_id);
           return coveredCycle?.status === 'passed';
@@ -1364,6 +1518,23 @@ export function createDemoClient() {
         if (action === 'pause') cycle.pause_reason = reason;
       }
       plan.status = cycle.status; cycle.updated_at = now(); plan.updated_at = now();
+      const activities = store.test_activities.filter((item) => item.cycle_id === cycle.id);
+      const activityTaskIds = new Set(activities.map((item) => item.task_id).filter(Boolean));
+      if (action === 'start') {
+        for (const activity of activities) if (activity.status === 'todo') activity.status = 'in_progress';
+        for (const task of store.tasks) if (activityTaskIds.has(task.id) && task.status === 'todo') task.status = 'in_progress';
+      } else if (action === 'pause') {
+        for (const activity of activities) if (activity.status === 'in_progress') activity.status = 'paused';
+        for (const task of store.tasks) if (activityTaskIds.has(task.id) && task.status === 'in_progress') task.status = 'paused';
+      } else if (action === 'resume') {
+        for (const activity of activities) if (activity.status === 'paused') activity.status = 'in_progress';
+        for (const task of store.tasks) if (activityTaskIds.has(task.id) && task.status === 'paused') task.status = 'in_progress';
+      } else if (action === 'cancel') {
+        for (const activity of activities) if (!['done', 'cancelled'].includes(activity.status)) activity.status = 'cancelled';
+        for (const task of store.tasks) if (activityTaskIds.has(task.id) && !['done', 'delayed_done'].includes(task.status)) task.status = 'paused';
+      }
+      for (const activity of activities) activity.updated_at = now();
+      for (const task of store.tasks) if (activityTaskIds.has(task.id)) task.updated_at = now();
       const project = store.projects.find((item) => item.id === plan.project_id);
       if (project && cycle.status === 'in_progress') project.test_state = 'testing';
       store.test_plan_events.push({ id: uuid(), plan_id: plan.id, cycle_id: cycle.id, event_type: `cycle_${action}`, actor_id: DEMO_DEV_ID, reason: reason || null, payload: {}, created_at: now() });
@@ -1390,6 +1561,21 @@ export function createDemoClient() {
         created_by: DEMO_DEV_ID, work_source: 'test_activity', test_plan_id: plan.id,
         test_cycle_id: cycle.id, test_activity_id: activityId, created_at: ts, updated_at: ts,
       });
+      const participantRows = Array.isArray(params.p_participants) ? params.p_participants : [];
+      const otherHours = participantRows
+        .filter((item: Row) => item.developer_id && item.developer_id !== params.p_owner_id)
+        .reduce((sum: number, item: Row) => sum + Math.max(0, Number(item.planned_hours ?? 0)), 0);
+      for (const item of participantRows.filter((row: Row) => row.developer_id && row.developer_id !== params.p_owner_id)) {
+        store.test_activity_participants.push({ id: uuid(), activity_id: activityId, developer_id: item.developer_id, planned_hours: Math.max(0, Number(item.planned_hours ?? 0)), created_at: ts });
+      }
+      store.test_activity_participants.push({
+        id: uuid(), activity_id: activityId, developer_id: params.p_owner_id,
+        planned_hours: Math.max(0, Number(params.p_planned_hours ?? 0) - otherHours), created_at: ts,
+      });
+      store.test_activities[store.test_activities.length - 1].planned_hours = oneDecimal(
+        store.test_activity_participants.filter((item) => item.activity_id === activityId)
+          .reduce((sum, item) => sum + Number(item.planned_hours ?? 0), 0),
+      );
       store.test_plan_events.push({ id: uuid(), plan_id: plan.id, cycle_id: cycle.id, event_type: 'activity_created', actor_id: DEMO_DEV_ID, reason: null, payload: { activity_id: activityId, task_id: taskId }, created_at: ts });
       save(); return { data: activityId, error: null };
     }
@@ -1599,16 +1785,177 @@ export function createDemoClient() {
       const task = store.tasks.find((item) => item.id === params.p_task_id);
       const hours = Number(params.p_hours);
       if (!task || !['test_activity', 'construction'].includes(task.work_source)) return err('只能为测试活动或测试建设任务登记工时');
+      if (!['in_progress', 'paused'].includes(task.status)) return err('仅进行中或已暂停的工作对象可以登记工时');
+      const activity = task.work_source === 'test_activity'
+        ? store.test_activities.find((item) => item.id === task.test_activity_id)
+        : null;
+      if ((task.work_source === 'test_activity' && !activity) || (activity && !['in_progress', 'paused'].includes(activity.status))) {
+        return err('当前测试活动状态不允许登记工时');
+      }
+      const constructionWork = task.work_source === 'construction'
+        ? store.test_construction_works.find((item) => item.id === task.construction_work_id)
+        : null;
+      if ((task.work_source === 'construction' && !constructionWork) || (constructionWork && !['active', 'paused'].includes(constructionWork.status))) {
+        return err('当前测试建设工作状态不允许登记工时');
+      }
       if (!(hours > 0 && hours <= 24)) return err('单日工时必须大于 0 且不超过 24 小时');
+      const canRecord = task.developer_id === DEMO_DEV_ID || (
+        task.work_source === 'test_activity'
+        && store.test_activity_participants.some((item) => item.activity_id === task.test_activity_id && item.developer_id === DEMO_DEV_ID)
+      );
+      if (!canRecord) return err('仅该建设子任务负责人或测试活动参与人可以登记工时');
       const start = `${params.p_work_date}T09:00:00.000Z`;
       const end = new Date(new Date(start).getTime() + hours * 3600000).toISOString();
       const segmentId = uuid();
-      store.task_work_segments.push({ id: segmentId, task_id: task.id, developer_id: DEMO_DEV_ID, started_at: start, ended_at: end, entry_source: 'manual', note: params.p_note ?? null, created_by: DEMO_DEV_ID });
+      store.task_work_segments.push({
+        ...TABLE_DEFAULTS.task_work_segments, id: segmentId, task_id: task.id, developer_id: DEMO_DEV_ID,
+        started_at: start, ended_at: end, entry_source: 'manual', note: params.p_note ?? null,
+        created_by: DEMO_DEV_ID, updated_at: now(),
+      });
       save(); return { data: segmentId, error: null };
+    }
+
+    if (name === 'get_test_work_entries') {
+      const task = store.tasks.find((item) => item.id === params.p_task_id);
+      if (!task || !['test_activity', 'construction'].includes(task.work_source)) return err('不是测试中心工时对象');
+      return {
+        data: {
+          items: store.task_work_segments.filter((item) => item.task_id === task.id)
+            .map((item): Row => ({ ...item, developer_name: store.developers.find((d) => d.id === item.developer_id)?.name ?? '未知人员' }))
+            .sort((a, b) => b.started_at.localeCompare(a.started_at)),
+          audits: store.task_work_segment_audits.filter((item) => item.task_id === task.id)
+            .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        },
+        error: null,
+      };
+    }
+
+    if (name === 'update_test_work_entry') {
+      const segment = store.task_work_segments.find((item) => item.id === params.p_segment_id);
+      const reason = String(params.p_reason ?? '').trim();
+      const hours = Number(params.p_hours);
+      if (!segment || segment.voided_at || !segment.ended_at) return err('有效工时明细不存在');
+      if (!reason) return err('修正工时必须填写原因');
+      if (!canCorrectTestWorkEntry(segment)) return err('无权修正该工时记录');
+      if (!(hours > 0 && hours <= 24) || !params.p_work_date) return err('日期必填，单日工时必须大于 0 且不超过 24 小时');
+      const before = { ...segment };
+      const start = `${params.p_work_date}T09:00:00.000Z`;
+      Object.assign(segment, {
+        started_at: start,
+        ended_at: new Date(new Date(start).getTime() + hours * 3600000).toISOString(),
+        note: String(params.p_note ?? '').trim() || null,
+        updated_at: now(),
+      });
+      store.task_work_segment_audits.push({
+        id: uuid(), segment_id: segment.id, task_id: segment.task_id, action: 'updated',
+        before_data: before, after_data: { ...segment }, actor_id: DEMO_DEV_ID, reason, created_at: now(),
+      });
+      save(); return { data: segment, error: null };
+    }
+
+    if (name === 'void_test_work_entry') {
+      const segment = store.task_work_segments.find((item) => item.id === params.p_segment_id);
+      const reason = String(params.p_reason ?? '').trim();
+      if (!segment || segment.voided_at || !segment.ended_at) return err('有效工时明细不存在');
+      if (!reason) return err('作废工时必须填写原因');
+      if (!canCorrectTestWorkEntry(segment)) return err('无权作废该工时记录');
+      const before = { ...segment };
+      Object.assign(segment, { voided_at: now(), voided_by: DEMO_DEV_ID, void_reason: reason, updated_at: now() });
+      store.task_work_segment_audits.push({
+        id: uuid(), segment_id: segment.id, task_id: segment.task_id, action: 'voided',
+        before_data: before, after_data: { ...segment }, actor_id: DEMO_DEV_ID, reason, created_at: now(),
+      });
+      save(); return { data: segment, error: null };
     }
 
     if (['submit_for_testing', 'start_test_task', 'conclude_test'].includes(name)) {
       return err('单任务提测已停用，请从统一测试中心发起项目 / 阶段 / 版本测试轮次');
+    }
+
+    if (name === 'update_project_business' || name === 'admin_update_project_business') {
+      const project = store.projects.find((item) => item.id === params.p_project_id);
+      if (!project) return err('项目不存在');
+      if (!String(params.p_name ?? '').trim()) return err('项目名称必填');
+      if (params.p_start_date && params.p_end_date && params.p_end_date < params.p_start_date) return err('项目结束日期不能早于开始日期');
+      const before = { ...project };
+      Object.assign(project, {
+        name: String(params.p_name).trim(), description: String(params.p_description ?? '').trim() || null,
+        start_date: params.p_start_date ?? null, end_date: params.p_end_date ?? null, updated_at: now(),
+      });
+      if (name === 'admin_update_project_business') {
+        const reason = String(params.p_reason ?? '').trim();
+        if (!reason) { Object.assign(project, before); return err('管理员异常处置必须填写原因'); }
+        store.project_admin_action_audits.push({ id: uuid(), project_id: project.id, action: 'business_update', before_data: before, after_data: { ...project }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
+      }
+      save(); return { data: project, error: null };
+    }
+
+    if (name === 'change_project_governance') {
+      const project = store.projects.find((item) => item.id === params.p_project_id);
+      const reason = String(params.p_reason ?? '').trim();
+      if (!project) return err('项目不存在');
+      if (!reason) return err('治理字段变更必须填写原因');
+      const before = { ...project };
+      Object.assign(project, { team_id: params.p_team_id, owner_id: params.p_owner_id, updated_at: now() });
+      store.project_admin_action_audits.push({ id: uuid(), project_id: project.id, action: 'structure_update', before_data: before, after_data: { ...project }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
+      save(); return { data: project, error: null };
+    }
+
+    if (name === 'transition_project') {
+      const project = store.projects.find((item) => item.id === params.p_project_id);
+      if (!project) return err('项目不存在');
+      if (params.p_action === 'pause' && project.status === 'active') project.status = 'paused';
+      else if (params.p_action === 'resume' && project.status === 'paused') project.status = 'active';
+      else return err('当前项目状态不能执行该操作');
+      project.updated_at = now(); save(); return { data: project, error: null };
+    }
+
+    if (name === 'lead_manage_task' || name === 'admin_manage_task') {
+      const task = store.tasks.find((item) => item.id === params.p_task_id);
+      const reason = String(params.p_reason ?? '').trim();
+      if (!task) return err('任务不存在');
+      if (!reason) return err('改派或调计划必须填写原因');
+      if (['review', 'testing', 'done', 'delayed_done'].includes(task.status)) return err('锁定或终态任务不能改派/调计划');
+      if (params.p_due_date < params.p_start_date) return err('截止日期不能早于开始日期');
+      const before = { ...task };
+      Object.assign(task, {
+        developer_id: params.p_developer_id ?? null, team_id: params.p_team_id ?? task.team_id,
+        start_date: params.p_start_date, due_date: params.p_due_date, priority: params.p_priority, updated_at: now(),
+      });
+      store.task_management_audits.push({ id: uuid(), task_id: task.id, action: name === 'lead_manage_task' ? 'lead_manage' : 'admin_manage', before_data: before, after_data: { ...task }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
+      save(); return { data: task, error: null };
+    }
+
+    if (name === 'admin_execute_task_action') {
+      const task = store.tasks.find((item) => item.id === params.p_task_id);
+      const reason = String(params.p_reason ?? '').trim();
+      if (!task) return err('任务不存在');
+      if (!reason) return err('管理员异常执行必须填写原因');
+      const actionMap: Row = { start: ['todo', 'in_progress'], pause: ['in_progress', 'paused'], resume: ['paused', 'in_progress'], submit: ['in_progress', 'review'] };
+      const [from, to] = actionMap[params.p_action] ?? [];
+      if (!from || task.status !== from) return err('当前任务状态不能执行该操作');
+      if (params.p_action === 'submit' && task.due_date < day(0) && !String(params.p_delay_note ?? '').trim()) return err('逾期提交必须填写延期原因');
+      const before = { ...task };
+      Object.assign(task, { status: to, delay_note: params.p_action === 'submit' ? String(params.p_delay_note ?? '').trim() : task.delay_note, updated_at: now() });
+      store.task_management_audits.push({ id: uuid(), task_id: task.id, action: 'admin_execute', before_data: before, after_data: { ...task }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
+      save(); return { data: task, error: null };
+    }
+
+    if (name === 'get_my_pending_approval_count') {
+      return { data: store.tasks.filter((task) => task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID).length, error: null };
+    }
+
+    if (name === 'get_dashboard_task_counts') {
+      const visible = store.tasks;
+      return { data: {
+        total: visible.length,
+        in_progress: visible.filter((task) => task.status === 'in_progress').length,
+        testing_active: visible.filter((task) => (task.task_type === 'dev' && task.status === 'testing') || (task.task_type === 'test' && !['done', 'delayed_done'].includes(task.status) && !task.test_result)).length,
+        pending_my_approval: visible.filter((task) => task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID).length,
+        completed: visible.filter((task) => task.status === 'done').length,
+        delayed_done: visible.filter((task) => task.status === 'delayed_done').length,
+        overdue: visible.filter((task) => !['done', 'delayed_done'].includes(task.status) && task.due_date < day(0)).length,
+      }, error: null };
     }
 
     if (name === 'get_project_summaries') {
@@ -1629,10 +1976,9 @@ export function createDemoClient() {
     if (name === 'list_tasks') {
       const completed = (task: Row) => ['done', 'delayed_done'].includes(task.status);
       const scope = params.p_scope ?? 'all';
-      const teamIds = new Set([
-        ...(store.developer_teams ?? []).filter((item) => item.developer_id === DEMO_DEV_ID).map((item) => item.team_id),
-        ...store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id),
-      ]);
+      const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
+      const managedDeveloperIds = new Set((store.developer_teams ?? [])
+        .filter((item) => ledTeamIds.has(item.team_id)).map((item) => item.developer_id));
       let rows = store.tasks.filter((task) => {
         if (params.p_focus_id && task.id !== params.p_focus_id) return false;
         if (params.p_project_id && task.project_id !== params.p_project_id) return false;
@@ -1648,6 +1994,11 @@ export function createDemoClient() {
           (task.task_type === 'dev' && task.status === 'testing') ||
           (task.task_type === 'test' && !completed(task) && !task.test_result)
         )) return false;
+        if (params.p_preset === 'pending_my_approval' && !(task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID)) return false;
+        if (params.p_preset === 'in_progress' && task.status !== 'in_progress') return false;
+        if (params.p_preset === 'completed' && task.status !== 'done') return false;
+        if (params.p_preset === 'delayed_done' && task.status !== 'delayed_done') return false;
+        if (params.p_preset === 'overdue' && (completed(task) || !task.due_date || task.due_date >= day(0))) return false;
         if (params.p_result && (task.task_type !== 'test' || task.test_result !== params.p_result)) return false;
         if (params.p_blocked != null) {
           const matchesBlocked = (store.test_rounds ?? []).some((round) => round.test_task_id === task.id && !!round.blocked === !!params.p_blocked);
@@ -1664,7 +2015,7 @@ export function createDemoClient() {
           if (!haystack.includes(query)) return false;
         }
         if (scope === 'mine' && task.developer_id !== DEMO_DEV_ID) return false;
-        if (scope === 'team' && task.developer_id !== DEMO_DEV_ID && !teamIds.has(task.team_id)) return false;
+        if (scope === 'team' && task.developer_id !== DEMO_DEV_ID && !managedDeveloperIds.has(task.developer_id)) return false;
         return true;
       });
       rows = rows.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));

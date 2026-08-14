@@ -5,9 +5,16 @@ export type AccountKey =
   | 'admin'
   | 'manager'
   | 'user'
+  | 'teamLead'
+  | 'otherTeamLead'
+  | 'emptyManager'
+  | 'teamMember'
+  | 'outsider'
+  | 'crossGroupOwner'
   | 'projectOwner'
   | 'testLead'
   | 'testEngineer'
+  | 'testParticipant'
   | 'automationTester';
 
 export interface UatAccount {
@@ -20,6 +27,7 @@ let loaded = false;
 export function loadUatEnv(file = path.resolve(process.cwd(), '.env.uat')) {
   if (loaded) return;
   loaded = true;
+  if (process.env.UAT_DISABLE_ENV_FILE === '1') return;
   if (!fs.existsSync(file)) return;
 
   for (const rawLine of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
@@ -42,9 +50,16 @@ const accountVars: Record<AccountKey, [string, string]> = {
   admin: ['UAT_ADMIN_EMAIL', 'UAT_ADMIN_PASSWORD'],
   manager: ['UAT_MANAGER_EMAIL', 'UAT_MANAGER_PASSWORD'],
   user: ['UAT_USER_EMAIL', 'UAT_USER_PASSWORD'],
+  teamLead: ['UAT_TEAM_LEAD_EMAIL', 'UAT_TEAM_LEAD_PASSWORD'],
+  otherTeamLead: ['UAT_OTHER_TEAM_LEAD_EMAIL', 'UAT_OTHER_TEAM_LEAD_PASSWORD'],
+  emptyManager: ['UAT_EMPTY_MANAGER_EMAIL', 'UAT_EMPTY_MANAGER_PASSWORD'],
+  teamMember: ['UAT_TEAM_MEMBER_EMAIL', 'UAT_TEAM_MEMBER_PASSWORD'],
+  outsider: ['UAT_OUTSIDER_EMAIL', 'UAT_OUTSIDER_PASSWORD'],
+  crossGroupOwner: ['UAT_CROSS_GROUP_OWNER_EMAIL', 'UAT_CROSS_GROUP_OWNER_PASSWORD'],
   projectOwner: ['UAT_PROJECT_OWNER_EMAIL', 'UAT_PROJECT_OWNER_PASSWORD'],
   testLead: ['UAT_TEST_LEAD_EMAIL', 'UAT_TEST_LEAD_PASSWORD'],
   testEngineer: ['UAT_TEST_ENGINEER_EMAIL', 'UAT_TEST_ENGINEER_PASSWORD'],
+  testParticipant: ['UAT_TEST_PARTICIPANT_EMAIL', 'UAT_TEST_PARTICIPANT_PASSWORD'],
   automationTester: ['UAT_AUTOMATION_TESTER_EMAIL', 'UAT_AUTOMATION_TESTER_PASSWORD'],
 };
 

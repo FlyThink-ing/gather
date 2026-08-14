@@ -39,6 +39,9 @@
 | 0009 项目测试完成门禁 | 通过轮次或已批准无需测试；admin 原因强制 | `rpc('complete_project')` 新门禁字段 |
 | 0010 内部测试候选项目与创建复核 | 仅项目负责人；活动项目、无活动轮次、非无需测试、存在已审批未覆盖任务 | `rpc('get_eligible_internal_test_projects')` + `create_test_plan` 分支 |
 | 0011 测试结论终态与建设详情汇总 | `pass/fail` 映射为 `passed/failed`；详情与列表统一四项聚合 | `review_test_conclusion` 分支 + `constructionSummary()` |
+| 0012 权限与流程加固 | 项目/任务统一可见集合、专用治理与执行动作、待我审批同口径统计 | `list_tasks`、项目/任务管理 RPC、`get_dashboard_task_counts` 分支 |
+| 0012 测试计划与工时真源 | 计划按参与关系可见；活动人员计划工时、有效已结束明细实际工时、跨日期交集 | `testPlanSummary`、`get_test_resource_summary`、`segmentHours` |
+| 0012 手工工时修正审计 | 单条查询、修正、作废；before/after、actor、reason 留痕 | `get_test_work_entries`、`update_test_work_entry`、`void_test_work_entry` 分支 |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

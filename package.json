@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test:uat:smoke": "playwright test --grep @smoke",
     "test:uat:full": "playwright test",
+    "test:uat:hardening": "playwright test --grep @hardening",
+    "test:uat:hardening:static": "playwright test --config=playwright.static.config.ts",
     "test:uat:report": "playwright show-report reports/uat/html"
   },
   "dependencies": {

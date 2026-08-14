@@ -29,7 +29,10 @@ Copy-Item .env.uat.example .env.uat
 ```powershell
 npm.cmd run test:uat:smoke
 npm.cmd run test:uat:full
+npm.cmd run test:uat:hardening
 ```
+
+权限与流程加固专项的账号关系、用例和门禁见[权限与流程加固自动化回归](./HARDENING-REGRESSION.md)。`npm.cmd run test:uat:hardening:static` 可在不读取 `.env.uat`、不访问网络的情况下检查 0012、UI 与 demo 实现合同。
 
 也可临时用进程环境变量运行公开检查，不落盘账号：
 
@@ -44,6 +47,7 @@ npm.cmd run test:uat:smoke -- --project=public-smoke
 
 - `smoke`：公开入口、登录/退出、三角色菜单和路由、基础创建入口、测试中心关键视图与必填校验。
 - `full`：smoke 加数据范围、任务完整流转、测试中心全流程、关键 UI 与 Supabase/RLS 越权。
+- `hardening`：0012 权限、深链、待我审批、测试计划可见性、工时修正/隔离及响应式布局专项；关键账号缺失直接失败，不跳过。
 - 单用例超时 45 秒，操作 15 秒，导航 30 秒；本地失败重试 1 次，CI 失败重试 2 次。没有无限等待。
 - 默认单 worker 串行执行，避免多个角色同时修改同一条 UAT 数据。
 

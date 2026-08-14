@@ -34,4 +34,23 @@
 | RLS-03 | full | 审批越权 | 非项目负责人不能批准/驳回 | 需项目负责人、非负责人及 review 任务 |
 | SAFE-01 | smoke | 敏感字段 | 页面不展示 Authorization/JWT/anon key | 已自动化、首轮通过 |
 
+## v2.19 权限与流程加固专项
+
+专项详细准备和执行方法见 [HARDENING-REGRESSION.md](./HARDENING-REGRESSION.md)。以下用例已实现但必须等待 0012 部署后取得产品结果；静态合同检查不代表运行时通过。
+
+| 编号 | 层级 | 场景 | 关键断言 | 当前状态 |
+|---|---|---|---|---|
+| AUTH-PROJ-01 | hardening/P0 | 项目编辑与治理 | owner、归属组长、异组组长、成员、admin 的 UI/RPC/RLS/落库矩阵；admin 原因和审计 | 已自动化，待部署执行 |
+| AUTH-TASK-01 | hardening/P0 | 任务动作矩阵 | 四状态下执行、管理、审批、删除；审批夹带字段、状态跳跃、终态改写全部失败 | 已自动化，待部署执行 |
+| AUTH-TASK-INSERT | hardening/P0 | 普通用户直接创建 | 合法本人开发任务成功；伪造测试来源/类型或挂不可见项目失败且不落库 | 已自动化，待部署执行 |
+| VIS-TASK-01 | hardening/P0 | 列表与深链 | scope、项目来源、focus、REST、list_tasks 对象集合一致 | 已自动化，待部署执行 |
+| SCOPE-EMPTY-01 | hardening/P0 | 空组 manager | team=本人∪有效成员；不按 task.team_id 扩权；scope=all 不能突破权限集合 | 已自动化，待部署执行 |
+| COUNT-REVIEW-01 | hardening/P0 | 待我审批 | RPC、工作台、项目统计、列表 total 和唯一 task ID 一致 | 已自动化，待部署执行 |
+| NAV-METRIC-01 | hardening/P1 | 统计导航 | 键盘 Enter 可操作，数字与筛选结果一致 | 已自动化，待部署执行 |
+| VIS-TEST-01 | hardening/P1 | 候选与计划可见性 | 未就绪/已就绪/requested 阶段，owner 只读、非参与不可见、测试职责分离 | 已自动化，待部署执行 |
+| HOURS-01 | hardening/P1 | 状态同步、工时修正与汇总 | accepted/todo 禁止登记；start/pause/resume 同步活动与任务；参与人执行期可登记；cancel 后活动 cancelled、任务锁定且禁止新增；修改、作废、终态组长修正及各层汇总一致 | 已自动化，待部署执行 |
+| HOURS-VIS-01 | hardening/P0 | 工时隔离 | 互不可见计划不泄露；建设参与人不能代记他人子任务工时 | 已自动化，待部署执行 |
+| UI-LAYOUT-01 | hardening/P2 | 活动与资源布局 | 375/768/1280、nowrap、无全局溢出、资源表可访问 | 已自动化，待部署执行 |
+| RULE-PARITY-01 | hardening/P0 | 五层一致 | UI、列表、深链、RPC/RLS、落库使用同一允许集合 | 已自动化，待部署执行 |
+
 首轮真实分角色执行前，应先确认本地 `.env.uat` 的业务身份映射，并检查已有 `UAT-质量保障组`、`UAT-研发组`、`UAT-全流程验收项目` 是否满足关系与状态前置条件。
