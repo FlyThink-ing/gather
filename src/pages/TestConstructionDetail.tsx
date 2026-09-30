@@ -10,8 +10,9 @@ import PageHeader from '../components/PageHeader';
 import Modal, { btnGhost, btnPrimary, inputCls, labelCls } from '../components/Modal';
 import Select from '../components/Select';
 import DatePicker from '../components/DatePicker';
+import TestWorkEntriesModal from '../components/TestWorkEntriesModal';
 import {
-  CONSTRUCTION_STATUS_LABEL, type ConstructionDetail, type Developer, type Team,
+  CONSTRUCTION_STATUS_LABEL, type ConstructionDetail, type Developer, type Team, type WorkSegment,
 } from '../lib/types';
 import { formatEffort } from '../lib/workload';
 
@@ -37,6 +38,7 @@ export default function TestConstructionDetailPage() {
   const [progressError, setProgressError] = useState('');
   const [task, setTask] = useState({ title: '', owner_id: '', planned_start: today(), planned_end: today(), planned_hours: '8' });
   const [hours, setHours] = useState({ date: today(), hours: '1', note: '' });
+  const [workEntriesTask, setWorkEntriesTask] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +61,17 @@ export default function TestConstructionDetailPage() {
   const canLead = role === 'admin' || isLead;
   const canOwn = role === 'admin' || isOwner;
   const testPeople = developers.filter((item) => ['测试工程师', '自动化测试工程师'].includes(item.position ?? ''));
+
+  const canManageConstructionWorkEntry = (entry: WorkSegment) => {
+    if (!workEntriesTask) return false;
+    const terminal = ['completed', 'cancelled'].includes(data?.status ?? '')
+      || ['done', 'delayed_done'].includes(workEntriesTask.status);
+    if (terminal) return canLead;
+    if (entry.entry_source === 'automatic') return canLead;
+    if (role === 'admin') return true;
+    return ['in_progress', 'paused'].includes(workEntriesTask.status)
+      && entry.developer_id === developer?.id;
+  };
 
   const rpc = async (name: string, params: Record<string, unknown>) => {
     setBusy(true);
@@ -120,7 +133,7 @@ export default function TestConstructionDetailPage() {
         <Metric label="任务进度" value={`${data.done_count}/${data.task_count}`} />
         <Metric label="计划工时" value={formatEffort(data.planned_hours)} />
         <Metric label="实际工时" value={formatEffort(data.actual_hours)} />
-        <Metric label="项目测试成本" value="不计入" hint="只进入三来源统一资源视图" />
+        <Metric label="资源汇总" value="全部来源" hint="建设工时仅进入统一资源汇总，不重复计入项目测试成本" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -133,16 +146,12 @@ export default function TestConstructionDetailPage() {
       <Card title="建设任务与实际工时">
         <div className="space-y-2">
           {data.tasks.map((item) => (
-            <div key={item.id} className="grid gap-3 rounded-lg border border-slate-200 p-3 text-sm md:grid-cols-[1fr_110px_170px_115px_210px] dark:border-slate-700">
-              <div><div className="font-medium">{item.title}</div><div className="mt-1 text-xs text-slate-500">进度 {item.progress}% · {constructionTaskStatusLabel[item.status] ?? item.status}</div></div>
-              <div>{item.owner_name}</div><div>{item.planned_start} ~ {item.planned_end}</div>
-              <div>{formatEffort(item.actual_hours)} / {formatEffort(item.planned_hours)}</div>
-              <div className="flex flex-wrap justify-end gap-1">
-                {item.status !== 'done' && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" onClick={() => { setProgressTask(item); setProgress(String(item.progress)); setProgressError(''); }}>更新进度</button>}
-                {item.status !== 'done' && <button className="rounded-lg border border-emerald-500/40 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300" onClick={() => rpc('update_construction_task', { p_construction_task_id: item.id, p_status: 'done', p_progress: 100 })}>完成</button>}
-                <button disabled={!item.task_id} className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800" onClick={() => { setHoursTask(item); setHours({ date: today(), hours: '1', note: '' }); }}>登记工时</button>
+            <div key={item.id} className="grid gap-3 rounded-xl border border-slate-200 p-3 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(110px,.7fr)_minmax(150px,.9fr)_110px_auto] dark:border-slate-700">
+              <div className="min-w-0"><div className="truncate font-medium">{item.title}</div><div className="mt-1 text-xs text-slate-500">进度 {item.progress}% · {constructionTaskStatusLabel[item.status] ?? item.status}</div></div>
+              <div className="min-w-0"><div className="text-xs text-slate-500 lg:hidden">负责人</div><div className="truncate whitespace-nowrap">{item.owner_name}</div></div><div className="whitespace-nowrap"><div className="text-xs text-slate-500 lg:hidden">计划日期</div>{item.planned_start} ~ {item.planned_end}</div>
+              <div className="whitespace-nowrap"><div className="text-xs text-slate-500">计划 / 实际</div><div className="mt-1 font-medium">{formatEffort(item.planned_hours)} / {formatEffort(item.actual_hours)}</div></div>
+              <div className="flex flex-wrap gap-1 lg:justify-end">{item.task_id && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700" onClick={() => setWorkEntriesTask(item)}>工时明细</button>}{item.status !== 'done' && (item.owner_id === developer?.id || canOwn || canLead) && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" onClick={() => { setProgressTask(item); setProgress(String(item.progress)); setProgressError(''); }}>更新进度</button>}{item.status !== 'done' && (item.owner_id === developer?.id || canOwn || canLead) && <button className="rounded-lg border border-emerald-500/40 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300" onClick={() => rpc('update_construction_task', { p_construction_task_id: item.id, p_status: 'done', p_progress: 100 })}>完成</button>}{item.task_id && ['active', 'paused'].includes(data.status) && ['in_progress', 'paused'].includes(item.status) && item.owner_id === developer?.id && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700" onClick={() => { setHoursTask(item); setHours({ date: today(), hours: '1', note: '' }); }}>登记工时</button>}</div>
               </div>
-            </div>
           ))}
           {!data.tasks.length && <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">尚未拆分建设任务</div>}
         </div>
@@ -170,6 +179,7 @@ export default function TestConstructionDetailPage() {
           <Actions busy={busy} text="保存工时" onCancel={() => setHoursTask(null)} onConfirm={() => rpc('record_test_work_hours', { p_task_id: hoursTask.task_id, p_work_date: hours.date, p_hours: Number(hours.hours), p_note: hours.note.trim() || null })} />
         </div>
       </Modal>
+      <TestWorkEntriesModal taskId={workEntriesTask?.task_id ?? null} title={workEntriesTask?.title ?? ''} open={!!workEntriesTask} onClose={() => setWorkEntriesTask(null)} canManage={canManageConstructionWorkEntry} />
 
       <Modal title={`更新进度 · ${progressTask?.title ?? ''}`} open={!!progressTask} onClose={() => !busy && setProgressTask(null)}>
         <div className="space-y-4">

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
+import { AlertDialog, ConfirmDialog } from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import { POSITIONS, type Developer, type Team, type Task } from '../lib/types';
 import { calcWorkload, isUnfinished } from '../lib/workload';
@@ -24,6 +25,9 @@ export default function Developers() {
   const [form, setForm] = useState({ name: '', position: POSITIONS[0] as string });
   const [formErr, setFormErr] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState<{ action: 'toggle' | 'remove'; developer: Developer } | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,22 +85,26 @@ export default function Developers() {
     load();
   };
 
-  const toggleActive = async (d: Developer) => {
-    const verb = d.is_active ? '停用' : '启用';
-    if (!window.confirm(`确认${verb}「${d.name}」？${d.is_active ? '停用后不再出现在任务分配和甘特图中。' : ''}`)) return;
-    const { error } = await supabase.from('developers').update({ is_active: !d.is_active }).eq('id', d.id);
-    if (error) alert(error.message);
+  const runConfirmedAction = async () => {
+    if (!confirming || actionSaving) return;
+    setActionSaving(true);
+    const { developer: target, action } = confirming;
+    const { error } = action === 'toggle'
+      ? await supabase.from('developers').update({ is_active: !target.is_active }).eq('id', target.id)
+      : await supabase.from('developers').delete().eq('id', target.id);
+    setActionSaving(false);
+    if (error) return setNotice(error.message);
+    setConfirming(null);
     load();
   };
-
-  const remove = async (d: Developer) => {
-    const open = tasks.filter((t) => t.developer_id === d.id && isUnfinished(t)).length;
-    const warn = open > 0 ? `\n注意：TA 名下还有 ${open} 个未完成任务，删除后将变为「未分配」。` : '';
-    if (!window.confirm(`确认删除开发人员「${d.name}」？${warn}`)) return;
-    const { error } = await supabase.from('developers').delete().eq('id', d.id);
-    if (error) alert(error.message);
-    load();
-  };
+  const confirmMessage = confirming?.action === 'toggle'
+    ? `确认${confirming.developer.is_active ? '停用' : '启用'}「${confirming.developer.name}」？${confirming.developer.is_active ? '停用后不再出现在任务分配和甘特图中。' : ''}`
+    : confirming
+      ? `确认删除开发人员「${confirming.developer.name}」？${(() => {
+        const openTasks = tasks.filter((task) => task.developer_id === confirming.developer.id && isUnfinished(task)).length;
+        return openTasks > 0 ? `\n注意：TA 名下还有 ${openTasks} 个未完成任务，删除后将变为「未分配」。` : '';
+      })()}`
+      : '';
 
   return (
     <div>
@@ -186,13 +194,13 @@ export default function Developers() {
                           {role === 'admin' && (
                             <>
                               <button
-                                onClick={() => toggleActive(d)}
+                                onClick={() => setConfirming({ action: 'toggle', developer: d })}
                                 className="rounded-md px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800"
                               >
                                 {d.is_active ? '停用' : '启用'}
                               </button>
                               <button
-                                onClick={() => remove(d)}
+                                onClick={() => setConfirming({ action: 'remove', developer: d })}
                                 className="rounded-md p-1.5 text-red-600 dark:text-red-400 hover:bg-red-500/10"
                                 title="删除"
                               >
@@ -248,6 +256,17 @@ export default function Developers() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog
+        title={confirming?.action === 'remove' ? '删除开发人员' : '确认变更人员状态'}
+        open={confirming !== null}
+        message={confirmMessage}
+        onClose={() => { if (!actionSaving) setConfirming(null); }}
+        onConfirm={runConfirmedAction}
+        confirmText={confirming?.action === 'remove' ? '确认删除' : confirming?.developer.is_active ? '确认停用' : '确认启用'}
+        busy={actionSaving}
+        danger={confirming?.action === 'remove' || confirming?.developer.is_active === true}
+      />
+      <AlertDialog open={!!notice} message={notice} onClose={() => setNotice('')} />
     </div>
   );
 }

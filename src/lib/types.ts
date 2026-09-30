@@ -171,6 +171,17 @@ export interface ProjectStatusEvent {
   created_at: string;
 }
 
+export interface ProjectAdminActionAudit {
+  id: string;
+  project_id: string;
+  action: 'business_update' | 'structure_update';
+  before_data: Record<string, unknown>;
+  after_data: Record<string, unknown>;
+  actor_id: string | null;
+  reason: string;
+  created_at: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -229,6 +240,40 @@ export interface WorkSegment {
   developer_id: string | null;
   started_at: string;
   ended_at: string | null;
+  entry_source: 'automatic' | 'manual';
+  note: string | null;
+  created_by: string | null;
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  updated_at: string;
+}
+
+export interface WorkSegmentAudit {
+  id: string;
+  segment_id: string;
+  task_id: string;
+  action: 'updated' | 'voided';
+  before_data: Record<string, unknown>;
+  after_data: Record<string, unknown>;
+  actor_id: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface TestWorkEntries {
+  items: Array<WorkSegment & { developer_name: string }>;
+  audits: WorkSegmentAudit[];
+}
+
+export interface DashboardTaskCounts {
+  total: number;
+  in_progress: number;
+  testing_active: number;
+  pending_my_approval: number;
+  completed: number;
+  delayed_done: number;
+  overdue: number;
 }
 
 /** 每个测试任务对应一轮测试汇总；禅道保留用例与 Bug 明细。 */
@@ -270,6 +315,17 @@ export interface TaskApprovalAudit {
   decision_note: string | null;
   submitted_at_snapshot: string | null;
   completed_at_snapshot: string | null;
+  created_at: string;
+}
+
+export interface TaskManagementAudit {
+  id: string;
+  task_id: string;
+  action: 'lead_manage' | 'admin_manage' | 'admin_execute';
+  before_data: Record<string, unknown>;
+  after_data: Record<string, unknown>;
+  actor_id: string | null;
+  reason: string;
   created_at: string;
 }
 
@@ -327,6 +383,7 @@ export interface TestPlanSummary {
   blocked_count: number;
   bug_count: number;
   reopen_count: number;
+  planned_hours: number;
   actual_hours: number;
   created_at: string;
   updated_at: string;
@@ -368,6 +425,12 @@ export interface TestReportStatus {
   not_issued_reason: string | null;
 }
 
+export interface TestActivityParticipant {
+  developer_id: string;
+  name: string;
+  planned_hours: number;
+}
+
 export interface TestActivity {
   id: string;
   cycle_id: string;
@@ -381,6 +444,7 @@ export interface TestActivity {
   actual_hours: number;
   status: string;
   task_id: string | null;
+  participants: TestActivityParticipant[];
 }
 
 export interface TestCycle {
@@ -405,6 +469,8 @@ export interface TestCycle {
   conclusion_risks: string | null;
   release_recommendation: string | null;
   conclusion_return_reason: string | null;
+  planned_hours: number;
+  actual_hours: number;
   scope_tasks: Record<string, unknown>[];
   participants: Record<string, unknown>[];
   activities: TestActivity[];

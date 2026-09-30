@@ -11,10 +11,12 @@ import PageHeader from '../components/PageHeader';
 import Modal, { btnGhost, btnPrimary, inputCls, labelCls } from '../components/Modal';
 import Select from '../components/Select';
 import DatePicker from '../components/DatePicker';
+import TestWorkEntriesModal from '../components/TestWorkEntriesModal';
 import {
-  STATUS_LABEL, TEST_CYCLE_STATUS_LABEL, TEST_TYPE_LABEL, type Developer, type Team, type TestCycle,
+  STATUS_LABEL, TEST_CYCLE_STATUS_LABEL, TEST_TYPE_LABEL, type Developer, type Team, type TestActivity, type TestCycle,
   type TestPlanDetail,
   type Task,
+  type WorkSegment,
 } from '../lib/types';
 import { formatEffort } from '../lib/workload';
 
@@ -37,6 +39,7 @@ export default function TestPlanDetailPage() {
   const [repairTaskId, setRepairTaskId] = useState('');
   const [hoursActivity, setHoursActivity] = useState<any>(null);
   const [hours, setHours] = useState({ date: today(), hours: '1', note: '' });
+  const [workEntriesActivity, setWorkEntriesActivity] = useState<any>(null);
   const [nextCycleVersion, setNextCycleVersion] = useState('');
   const [nextCycleError, setNextCycleError] = useState('');
   const [reportId, setReportId] = useState('');
@@ -78,7 +81,21 @@ export default function TestPlanDetailPage() {
   const isMain = cycle?.main_tester_id === developer?.id;
   const canLead = role === 'admin' || isLead;
   const canOperate = role === 'admin' || isLead || isMain;
+  const isProjectOwnerReadOnly = !!data?.project_id && !canOperate && data.project_id !== null;
   const totals = useMemo(() => aggregate(cycle), [cycle]);
+  const canLogActivityHours = (item: TestActivity) => !!developer
+    && ['in_progress', 'paused'].includes(item.status)
+    && (item.owner_id === developer.id || (item.participants ?? []).some((participant) => participant.developer_id === developer.id));
+  const canManageActivityWorkEntry = (entry: WorkSegment) => {
+    if (!workEntriesActivity) return false;
+    const terminal = ['passed', 'failed', 'cancelled'].includes(cycle?.status ?? '')
+      || ['done', 'delayed_done'].includes(workEntriesActivity.status);
+    if (terminal) return canLead;
+    if (entry.entry_source === 'automatic') return canLead;
+    if (role === 'admin') return true;
+    return ['in_progress', 'paused'].includes(workEntriesActivity.status)
+      && entry.developer_id === developer?.id;
+  };
 
   const run = async (name: string, params: Record<string, unknown>, close = true) => {
     setBusy(true);
@@ -249,6 +266,7 @@ export default function TestPlanDetailPage() {
           </div>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
+          {isProjectOwnerReadOnly && <span className="rounded-full bg-slate-500/10 px-3 py-2 text-sm text-slate-600 dark:text-slate-300">只读访问</span>}
           {canLead && ['requested', 'returned'].includes(cycle.status) && (
             <>
               <button className={btnPrimary} onClick={() => { setSchedule((current) => ({ ...current, main_tester_id: data.recommended_owner_id ?? testPeople[0]?.id ?? '', planned_start: data.expected_start ?? today(), planned_end: data.expected_end ?? today() })); setModal('schedule'); }}>确认排期</button>
@@ -284,7 +302,7 @@ export default function TestPlanDetailPage() {
         <Metric label="通过 / 失败" value={`${totals.passed} / ${totals.failed}`} icon={<CheckCircle2 size={16} />} />
         <Metric label="阻塞" value={String(totals.blocked)} icon={<ShieldAlert size={16} />} danger={totals.blocked > 0} />
         <Metric label="新增 Bug / Reopen" value={`${totals.bugs} / ${totals.reopen}`} icon={<Bug size={16} />} danger={totals.bugs > 0} />
-        <Metric label="实际投入" value={formatEffort(cycle.activities.reduce((sum, item) => sum + Number(item.actual_hours ?? 0), 0))} icon={<Clock3 size={16} />} />
+        <Metric label="本轮实际投入" value={formatEffort(cycle.actual_hours ?? cycle.activities.reduce((sum, item) => sum + Number(item.actual_hours ?? 0), 0))} icon={<Clock3 size={16} />} />
       </div>
 
       <Section title="范围快照" hint="只保存当时已审批开发任务的快照；历史审批记录不会随负责人变更而改写。">
@@ -298,12 +316,12 @@ export default function TestPlanDetailPage() {
       <Section title="测试活动与实际工时" hint="活动生成工作任务，但由测试中心状态机控制，不经过项目负责人审批。">
         <div className="space-y-2">
           {cycle.activities.map((item) => (
-            <div key={item.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 text-sm md:grid-cols-[1fr_130px_170px_90px_90px_90px] dark:border-slate-700">
-              <div><span className="font-medium">{item.title}</span><div className="mt-1 text-xs text-slate-500">{TEST_TYPE_LABEL[item.activity_type] ?? item.activity_type}</div></div>
-              <div>{item.owner_name}</div><div>{item.planned_start} ~ {item.planned_end}</div>
-              <div><div className="text-xs text-slate-500">计划工时</div><div className="mt-1 font-medium">{formatEffort(item.planned_hours)}</div></div>
-              <div><div className="text-xs text-slate-500">实际工时</div><div className="mt-1 font-medium">{formatEffort(item.actual_hours)}</div></div>
-              <button disabled={!item.task_id || !canOperate} className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700" onClick={() => { setHoursActivity(item); setHours({ date: today(), hours: '1', note: '' }); }}>登记工时</button>
+            <div key={item.id} className="grid gap-3 rounded-xl border border-slate-200 p-3 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,.7fr)_minmax(150px,.9fr)_100px_100px_auto] dark:border-slate-700">
+              <div className="min-w-0"><span className="block truncate font-medium">{item.title}</span><div className="mt-1 text-xs text-slate-500">{TEST_TYPE_LABEL[item.activity_type] ?? item.activity_type}</div></div>
+              <div className="min-w-0"><div className="text-xs text-slate-500 lg:hidden">负责人</div><div className="truncate whitespace-nowrap">{item.owner_name}</div></div><div className="whitespace-nowrap"><div className="text-xs text-slate-500 lg:hidden">计划日期</div>{item.planned_start} ~ {item.planned_end}</div>
+              <div className="whitespace-nowrap"><div className="text-xs text-slate-500">计划投入</div><div className="mt-1 font-medium">{formatEffort(item.planned_hours)}</div></div>
+              <div className="whitespace-nowrap"><div className="text-xs text-slate-500">实际投入</div><div className="mt-1 font-medium">{formatEffort(item.actual_hours)}</div></div>
+              <div className="flex flex-wrap gap-1 lg:justify-end">{item.task_id && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700" onClick={() => setWorkEntriesActivity(item)}>工时明细</button>}{item.task_id && canLogActivityHours(item) && <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700" onClick={() => { setHoursActivity(item); setHours({ date: today(), hours: '1', note: '' }); }}>登记工时</button>}</div>
             </div>
           ))}
           {!cycle.activities.length && <Empty text="尚未拆分测试活动" />}
@@ -327,10 +345,10 @@ export default function TestPlanDetailPage() {
           {cycle.reports.map((report) => (
             <div key={report.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 dark:border-slate-700">
               <div><div className="font-medium">{report.report_name}</div><div className="mt-1 text-xs text-slate-500">{report.is_required ? '提交结论前必须完成状态' : '选填'}</div>{report.not_issued_reason && <div className="mt-1 text-xs text-amber-600">未出具：{report.not_issued_reason}</div>}</div>
-              <div className="flex gap-2">
-                <button disabled={!canOperate || busy} className={`rounded px-2 py-1 text-xs ${report.status === 'issued' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800'}`} onClick={() => run('set_test_report_status', { p_report_id: report.id, p_status: 'issued', p_not_issued_reason: null }, false)}>已出具</button>
-                <button disabled={!canOperate || busy} className={`rounded px-2 py-1 text-xs ${report.status === 'not_issued' ? 'bg-amber-600 text-white' : 'bg-slate-100 dark:bg-slate-800'}`} onClick={() => openReportReason(report.id)}>未出具</button>
-              </div>
+              {canOperate && <div className="flex gap-2">
+                <button disabled={busy} className={`rounded px-2 py-1 text-xs ${report.status === 'issued' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800'}`} onClick={() => run('set_test_report_status', { p_report_id: report.id, p_status: 'issued', p_not_issued_reason: null }, false)}>已出具</button>
+                <button disabled={busy} className={`rounded px-2 py-1 text-xs ${report.status === 'not_issued' ? 'bg-amber-600 text-white' : 'bg-slate-100 dark:bg-slate-800'}`} onClick={() => openReportReason(report.id)}>未出具</button>
+              </div>}
             </div>
           ))}
           {!cycle.reports.length && <Empty text="本轮未要求测试报告" />}
@@ -446,6 +464,7 @@ export default function TestPlanDetailPage() {
           }} text="保存工时" />
         </div>
       </Modal>
+      <TestWorkEntriesModal taskId={workEntriesActivity?.task_id ?? null} title={workEntriesActivity?.title ?? ''} open={!!workEntriesActivity} onClose={() => setWorkEntriesActivity(null)} canManage={canManageActivityWorkEntry} />
     </div>
   );
 }

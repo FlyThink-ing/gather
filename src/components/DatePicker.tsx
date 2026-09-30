@@ -44,13 +44,16 @@ export default function DatePicker({
       ) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
 
@@ -110,7 +113,7 @@ export default function DatePicker({
         <div
           ref={calendarRef}
           style={position ? { top: position.top, left: position.left, width: Math.max(position.width, 256), maxHeight: position.maxHeight } : { visibility: 'hidden' }}
-          className="fixed z-[60] overflow-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-3 shadow-xl"
+          className="fixed z-[110] overflow-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-3 shadow-xl"
         >
           {/* 月份切换 */}
           <div className="mb-2 flex items-center justify-between">

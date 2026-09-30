@@ -5,8 +5,21 @@
   "description": "任务/项目管理系统",
   "scripts": {
     "start": "webpack serve --mode development",
+    "start:local": "set LOCAL_SUPABASE=1&& webpack serve --mode development --no-open",
     "build": "webpack --mode production",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "local:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-supabase.ps1 start",
+    "local:reset": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-supabase.ps1 reset",
+    "local:fixtures": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-supabase.ps1 fixtures",
+    "local:stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-supabase.ps1 stop",
+    "test:local:smoke": "npm run local:start && npm run local:fixtures && set LOCAL_SUPABASE=1&& playwright test --grep @smoke",
+    "test:local:hardening": "npm run local:start && npm run local:fixtures && set LOCAL_SUPABASE=1&& playwright test --grep @hardening",
+    "test:local:full": "npm run local:start && npm run local:fixtures && set LOCAL_SUPABASE=1&& playwright test",
+    "test:uat:smoke": "playwright test --grep @smoke",
+    "test:uat:full": "playwright test",
+    "test:uat:hardening": "playwright test --grep @hardening",
+    "test:uat:hardening:static": "playwright test --config=playwright.static.config.ts",
+    "test:uat:report": "playwright show-report reports/uat/html"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -19,6 +32,7 @@
     "recharts": "^2.12.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
@@ -28,6 +42,7 @@
     "postcss": "^8.4.40",
     "postcss-loader": "^8.1.1",
     "style-loader": "^4.0.0",
+    "supabase": "^2.114.0",
     "tailwindcss": "^3.4.7",
     "ts-loader": "^9.5.1",
     "typescript": "^5.5.4",

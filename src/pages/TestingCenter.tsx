@@ -382,10 +382,10 @@ export default function TestingCenter() {
             <Metric label="内部项目测试实际工时" value={formatEffort(Number(totals.internal_project ?? 0))} />
             <Metric label="外部独立测试实际工时" value={formatEffort(Number(totals.external_request ?? 0))} />
             <Metric label="测试建设实际工时" value={formatEffort(Number(totals.construction ?? 0))} />
-            <Metric label="三来源实际工时合计" value={formatEffort(Number(totals.internal_project ?? 0) + Number(totals.external_request ?? 0) + Number(totals.construction ?? 0))} />
+            <Metric label="全部来源实际工时" value={formatEffort(Number(totals.all_sources ?? Number(totals.internal_project ?? 0) + Number(totals.external_request ?? 0) + Number(totals.construction ?? 0)))} />
           </div>
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-            <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <table className="min-w-[760px] w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950/60">
                 <tr><th className="px-4 py-3">人员</th><th>计划工时</th><th>内部项目</th><th>外部测试</th><th>测试建设</th><th>并发冲突</th></tr>
               </thead>
@@ -544,10 +544,10 @@ function PlanList({ items, onOpen }: { items: TestPlanSummary[]; onOpen: (id: st
         </div>
         <ChevronRight className="text-slate-400 transition group-hover:translate-x-1" size={18} />
       </div>
-      <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
+      <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
         <SmallMetric label={`第 ${plan.cycle_no} 轮`} value={plan.stage_version} />
         <SmallMetric label="执行 / 计划" value={`${plan.executed_case_count}/${plan.planned_case_count}`} />
-        <SmallMetric label="实际投入" value={formatEffort(plan.actual_hours)} />
+        <SmallMetric label="全计划累计实际投入" value={formatEffort(plan.actual_hours)} />
         <SmallMetric label="失败 / 阻塞" value={`${plan.failed_count}/${plan.blocked_count}`} danger={plan.failed_count + plan.blocked_count > 0} />
         <SmallMetric label="新增 Bug" value={String(plan.bug_count)} danger={plan.bug_count > 0} />
         <SmallMetric label="主测" value={plan.main_tester_name ?? '待排期'} />
@@ -566,7 +566,7 @@ function ConstructionList({ items, onOpen }: { items: ConstructionSummary[]; onO
         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">{CONSTRUCTION_STATUS_LABEL[item.status]}</span>
         <ChevronRight className="text-slate-400" size={18} />
       </div>
-      <div className="mt-4 grid grid-cols-4 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <SmallMetric label="负责人" value={item.owner_name} />
         <SmallMetric label="任务进度" value={`${item.done_count}/${item.task_count}`} />
         <SmallMetric label="计划工时" value={formatEffort(item.planned_hours)} />
