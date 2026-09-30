@@ -1,9 +1,16 @@
 const path = require('path');
+const fs = require('fs');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const Dotenv = require('dotenv-webpack');
 
 module.exports = (env, argv) => {
   const isProd = argv.mode === 'production';
+  const localEnvPath = path.resolve(__dirname, '.env.local');
+  const dotenvPath = process.env.DOTENV_CONFIG_PATH
+    ? path.resolve(__dirname, process.env.DOTENV_CONFIG_PATH)
+    : process.env.LOCAL_SUPABASE === '1' && fs.existsSync(localEnvPath)
+      ? localEnvPath
+      : undefined;
   return {
     entry: './src/index.tsx',
     output: {
@@ -31,7 +38,7 @@ module.exports = (env, argv) => {
     },
     plugins: [
       new HtmlWebpackPlugin({ template: './public/index.html' }),
-      new Dotenv({ systemvars: true, silent: true }),
+      new Dotenv({ path: dotenvPath, systemvars: true, silent: true }),
     ],
     devServer: {
       static: path.resolve(__dirname, 'public'),

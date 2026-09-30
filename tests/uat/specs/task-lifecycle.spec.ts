@@ -133,7 +133,10 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
     }
 
     const forbidden = await patchStatus(testLead, approveTask.id, { status: 'done' });
-    expect(forbidden.status).toBeGreaterThanOrEqual(400);
+    expect(
+      forbidden.status >= 400 || (forbidden.status === 200 && forbidden.data?.length === 0),
+      '无权审批必须由错误响应或 RLS 空结果拒绝',
+    ).toBe(true);
     const stillReview = await admin.rest.request<Array<{ status: string }>>(admin.page, `tasks?select=status&id=eq.${approveTask.id}`);
     expect(stillReview.data?.[0]?.status).toBe('review');
 

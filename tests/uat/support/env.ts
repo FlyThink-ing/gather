@@ -24,7 +24,10 @@ export interface UatAccount {
 
 let loaded = false;
 
-export function loadUatEnv(file = path.resolve(process.cwd(), '.env.uat')) {
+export function loadUatEnv(file = path.resolve(
+  process.cwd(),
+  process.env.LOCAL_SUPABASE === '1' ? '.env.uat.local' : '.env.uat',
+)) {
   if (loaded) return;
   loaded = true;
   if (process.env.UAT_DISABLE_ENV_FILE === '1') return;

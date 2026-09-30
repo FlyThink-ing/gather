@@ -1,9 +1,11 @@
 node_modules/
 dist/
 .env
+.env.local
 .env.uat
 .env.uat.*
 !.env.uat.example
+.local/
 *.log
 .DS_Store
 .claude/

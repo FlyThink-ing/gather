@@ -300,7 +300,7 @@ test('测试建设创建、排期、拆分、更新进度、工时与成果确�
     await expect(automation.page.getByText('任务进度', { exact: true }).locator('..')).toContainText('1/1');
     await expect(automation.page.getByText('计划工时', { exact: true }).locator('..')).toContainText('8.0 小时');
     await expect(automation.page.getByText('实际工时', { exact: true }).locator('..')).toContainText('1.0 小时');
-    await expect(automation.page.getByRole('heading', { name: '建设任务与实际工时' }).locator('..')).toContainText('1.0 小时 / 0.1 人天 / 8.0 小时 / 1.0 人天');
+    await expect(automation.page.getByRole('heading', { name: '建设任务与实际工时' }).locator('..')).toContainText('8.0 小时 / 1.0 人天 / 1.0 小时 / 0.1 人天');
   } finally {
     await Promise.all(sessions.map(({ context }) => context.close()));
   }

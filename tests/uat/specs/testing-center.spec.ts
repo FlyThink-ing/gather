@@ -12,13 +12,14 @@ test.describe('测试中心', () => {
     await expect(page.getByRole('button', { name: '资源汇总' })).toBeVisible();
 
     await page.getByRole('button', { name: '登记外部测试' }).click();
-    await expect(page.getByRole('heading', { name: '登记外部独立测试' })).toBeVisible();
-    await page.getByRole('button', { name: '提交测试申请' }).click();
-    await expect(page.getByText('计划名称、测试范围和测试目标必填')).toBeVisible();
-    await page.getByRole('button', { name: '取消' }).click();
+    const externalDialog = page.getByRole('dialog', { name: '登记外部独立测试' });
+    await expect(externalDialog).toBeVisible();
+    await externalDialog.getByRole('button', { name: '提交测试申请' }).click();
+    await expect(externalDialog.getByText('计划名称、测试范围和测试目标必填')).toBeVisible();
+    await externalDialog.getByRole('button', { name: '取消', exact: true }).click();
 
     await page.getByRole('button', { name: '资源汇总' }).click();
-    await expect(page.getByText('三来源实际工时合计')).toBeVisible();
+    await expect(page.getByText('全部来源实际工时')).toBeVisible();
     await expect(page.getByText('内部项目测试实际工时')).toBeVisible();
     await expect(page.getByText('外部独立测试实际工时')).toBeVisible();
     await expect(page.getByText('测试建设实际工时')).toBeVisible();

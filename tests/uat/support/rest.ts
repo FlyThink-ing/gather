@@ -4,6 +4,7 @@ type SafeResult<T> = { status: number; data: T | null; errorCode: string | null;
 
 export class BrowserRestClient {
   private headers: Record<string, string> | null = null;
+  private restBaseUrl: string | null = null;
 
   attach(page: Page) {
     const capture = (request: Request) => {
@@ -11,6 +12,7 @@ export class BrowserRestClient {
       const headers = request.headers();
       if (headers.authorization && headers.apikey) {
         this.headers = { authorization: headers.authorization, apikey: headers.apikey };
+        this.restBaseUrl = request.url().split('/rest/v1/')[0] + '/rest/v1';
       }
     };
     page.on('request', capture);
@@ -26,10 +28,11 @@ export class BrowserRestClient {
   }
 
   async request<T>(page: Page, resource: string, init: { method?: string; body?: unknown; prefer?: string } = {}): Promise<SafeResult<T>> {
-    if (!this.headers) throw new Error('REST 客户端尚未就绪。');
+    if (!this.headers || !this.restBaseUrl) throw new Error('REST 客户端尚未就绪。');
     const safeHeaders = this.headers;
-    return page.evaluate(async ({ resource, init, safeHeaders }) => {
-      const response = await fetch(`/rest/v1/${resource}`, {
+    const restBaseUrl = this.restBaseUrl;
+    return page.evaluate(async ({ resource, init, safeHeaders, restBaseUrl }) => {
+      const response = await fetch(`${restBaseUrl}/${resource}`, {
         method: init.method ?? 'GET',
         headers: {
           ...safeHeaders,
@@ -48,6 +51,6 @@ export class BrowserRestClient {
         // 仅保留服务端业务错误文本，不记录请求头、请求体、Token 或 Cookie。
         errorMessage: response.ok ? null : (typeof parsed?.message === 'string' ? parsed.message.slice(0, 500) : null),
       };
-    }, { resource, init, safeHeaders });
+    }, { resource, init, safeHeaders, restBaseUrl });
   }
 }

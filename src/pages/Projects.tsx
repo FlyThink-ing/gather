@@ -106,7 +106,7 @@ export default function Projects() {
 
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? '-';
   const devName = (id: string | null) => developers.find((d) => d.id === id)?.name ?? '待指定';
-  const isOwner = (p: Project) => !!developer && p.owner_id === developer.id;
+  const isOwner = (p: Project | null) => !!developer && !!p && p.owner_id === developer.id;
   const canEditProject = (p: Project) => isOwner(p) || role === 'admin';
   const canCompleteProject = (p: Project) =>
     p.status !== 'completed' && (role === 'admin' || (!!developer && p.owner_id === developer.id));
@@ -222,6 +222,7 @@ export default function Projects() {
 
   const openTasks = (project: ProjectSummary, filters: Record<string, string>) => {
     const params = new URLSearchParams({
+      scope: 'all',
       source: 'project',
       project: project.id,
       returnTo: '/projects',

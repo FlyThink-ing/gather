@@ -258,6 +258,10 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
       );
       const constructionTaskId = taskRows.data?.[0]?.task_id;
       expect(constructionTaskId).toBeTruthy();
+      const startedConstructionTask = await rpc(actors.automationTester, 'update_construction_task', {
+        p_construction_task_id: subTask.data, p_status: 'in_progress', p_progress: 10,
+      });
+      expect(startedConstructionTask.status).toBe(204);
       const participantLog = await rpc(actors.testParticipant, 'record_test_work_hours', {
         p_task_id: constructionTaskId, p_work_date: '2099-02-01', p_hours: 1,
         p_note: 'FORBIDDEN construction participant proxy log',

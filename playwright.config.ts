@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { loadUatEnv, uatEnv } from './tests/uat/support/env';
 
 loadUatEnv();
+const localMode = process.env.LOCAL_SUPABASE === '1';
 
 if (!uatEnv.baseUrl) {
   throw new Error('缺少 UAT_BASE_URL：请复制 .env.uat.example 为 .env.uat 并填写站点地址。');
@@ -13,13 +14,19 @@ export default defineConfig({
   workers: 1,
   timeout: 45_000,
   expect: { timeout: 10_000 },
-  retries: process.env.CI ? 2 : 1,
+  retries: localMode ? 0 : process.env.CI ? 2 : 1,
   forbidOnly: !!process.env.CI,
   outputDir: 'artifacts/uat/test-results',
   reporter: [
     ['line'],
     ['html', { outputFolder: 'reports/uat/html', open: 'never' }],
   ],
+  webServer: localMode ? {
+    command: 'npm run start:local',
+    url: 'http://127.0.0.1:3000',
+    reuseExistingServer: true,
+    timeout: 120_000,
+  } : undefined,
   use: {
     baseURL: uatEnv.baseUrl,
     actionTimeout: 15_000,

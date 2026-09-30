@@ -427,6 +427,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       expect(summaries.data?.find(({ id }) => id === projectId)?.review_count).toBe(1);
 
       await actors.crossGroupOwner.page.goto('/#/dashboard');
+      await actors.crossGroupOwner.page.reload();
       const card = actors.crossGroupOwner.page.getByRole('button', { name: /待我审批/ });
       await expect(card).toContainText('1');
       await card.focus();

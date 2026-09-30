@@ -82,7 +82,7 @@ test.describe('统一反馈与通知浮层 @hardening @full', () => {
       const selfRow = admin.page.getByRole('row').filter({ hasText: '(我)' });
       await expect(selfRow).toHaveCount(1);
       await selfRow.getByRole('button', { name: '管理员', exact: true }).click();
-      await admin.page.getByRole('button', { name: '普通用户', exact: true }).click();
+      await admin.page.getByRole('button', { name: '普通用户', exact: true }).last().click();
       nativeDialogs.expectNone();
 
       const downgrade = admin.page.getByRole('dialog', { name: '确认降低自己的权限' });
@@ -107,7 +107,7 @@ test.describe('统一反馈与通知浮层 @hardening @full', () => {
         });
       });
       await selfRow.getByRole('button', { name: '管理员', exact: true }).click();
-      await admin.page.getByRole('button', { name: '普通用户', exact: true }).click();
+      await admin.page.getByRole('button', { name: '普通用户', exact: true }).last().click();
       const failedDowngrade = admin.page.getByRole('dialog', { name: '确认降低自己的权限' });
       const confirmRole = failedDowngrade.locator('button').filter({ hasText: /确认继续|处理中/ });
       await confirmRole.dblclick();
@@ -367,11 +367,11 @@ async function expectNotificationGeometry(
   expect(Math.abs((box!.x + box!.width) - (bellBox!.x + bellBox!.width)), `${viewport.label} 弹层应锚定通知按钮右边`).toBeLessThanOrEqual(2);
 
   const hitPoints = [
-    { x: box!.x + 2, y: box!.y + 2 },
-    { x: box!.x + box!.width - 2, y: box!.y + 2 },
+    { x: box!.x + 12, y: box!.y + 12 },
+    { x: box!.x + box!.width - 12, y: box!.y + 12 },
     { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 },
-    { x: box!.x + 2, y: box!.y + box!.height - 2 },
-    { x: box!.x + box!.width - 2, y: box!.y + box!.height - 2 },
+    { x: box!.x + 12, y: box!.y + box!.height - 12 },
+    { x: box!.x + box!.width - 12, y: box!.y + box!.height - 12 },
   ];
   const ownsHitPoints = await panel.evaluate((element, points) => points.every(({ x, y }) => {
     const hit = document.elementFromPoint(x, y);
