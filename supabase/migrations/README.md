@@ -42,6 +42,7 @@
 | 0012 权限与流程加固 | 项目/任务统一可见集合、专用治理与执行动作、待我审批同口径统计 | `list_tasks`、项目/任务管理 RPC、`get_dashboard_task_counts` 分支 |
 | 0012 测试计划与工时真源 | 计划按参与关系可见；活动人员计划工时、有效已结束明细实际工时、跨日期交集 | `testPlanSummary`、`get_test_resource_summary`、`segmentHours` |
 | 0012 手工工时修正审计 | 单条查询、修正、作废；before/after、actor、reason 留痕 | `get_test_work_entries`、`update_test_work_entry`、`void_test_work_entry` 分支 |
+| 0016 新建任务的项目候选 | 组员可选择本组进行中的项目创建本人开发任务 | `get_task_creation_projects`、`taskCreationAccess` 与任务 insert 分支 |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

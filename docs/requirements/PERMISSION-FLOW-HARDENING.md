@@ -51,6 +51,8 @@ metric_count(actor, filters)
 * actor 管理项目所属小组；
 * actor 是项目有效任务负责人或获授权测试参与人，只返回其工作所需摘要。
 
+新建本人开发任务时，组员还可选择所属小组中进行中的项目。候选接口仅返回项目 ID、名称和所属小组 ID，项目详情和他人任务仍分别按各自的可见规则授权。
+
 `can_edit_project_business(actor, project)`：项目负责人；admin 仅异常处置。允许字段限定为描述、计划开始/结束日期、测试说明等业务字段。
 
 `can_change_project_governance(actor, project)`：admin，或管理项目所属小组的 manager。只允许通过独立动作修改 `team_id`、`owner_id`，必须审计。

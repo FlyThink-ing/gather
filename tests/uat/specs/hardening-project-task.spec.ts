@@ -120,23 +120,28 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       const teamId = await createTeam(actors.admin, `UAT-任务权限组-${suffix}`, actors.teamLead.developerId);
       const otherTeamId = await createTeam(actors.admin, `UAT-任务权限异组-${suffix}`, actors.otherTeamLead.developerId);
       await addTeamMember(actors.admin, teamId, actors.teamMember.developerId);
+      const projectName = `UAT-AUTH-TASK-01-${suffix}`;
       const projectId = await createProject(actors.admin, {
-        name: `UAT-AUTH-TASK-01-${suffix}`, teamId, ownerId: actors.crossGroupOwner.developerId, start, end,
+        name: projectName, teamId, ownerId: actors.crossGroupOwner.developerId, start, end,
       });
+      const invisibleProjectName = `UAT-AUTH-TASK-不可见项目-${suffix}`;
       const invisibleProjectId = await createProject(actors.admin, {
-        name: `UAT-AUTH-TASK-不可见项目-${suffix}`, teamId: otherTeamId,
+        name: invisibleProjectName, teamId: otherTeamId,
         ownerId: actors.otherTeamLead.developerId, start, end,
       });
-      const rows = await createTasks(actors.admin, [
-        'todo', 'jump-done', 'jump-delayed', 'in-progress', 'paused', 'review-owner',
-        'review-delayed', 'review-admin', 'admin-action', 'delete-guard',
-      ].map((name) => ({
-        title: `UAT-AUTH-TASK-${name}-${suffix}`, projectId,
-        developerId: actors.teamMember.developerId, teamId,
-        start: name === 'review-delayed' ? isoDate(-3) : start,
-        due: name === 'review-delayed' ? isoDate(-2) : end,
-      })));
-      const byName = (needle: string) => rows.find((row) => row.title.includes(needle))!;
+      await createTasks(actors.teamLead, [{
+        title: `UAT-AUTH-TASK-组长本人任务-${suffix}`, projectId,
+        developerId: actors.teamLead.developerId, teamId, start, due: end,
+      }]);
+      const memberPage = actors.teamMember.page;
+      await memberPage.goto('/#/tasks');
+      await memberPage.getByRole('button', { name: '添加任务', exact: true }).click();
+      const createDialog = memberPage.getByRole('dialog', { name: '添加任务' });
+      await createDialog.getByRole('button', { name: '请选择项目', exact: true }).click();
+      await expect(memberPage.getByRole('button', { name: projectName, exact: true })).toBeVisible();
+      await expect(memberPage.getByRole('button', { name: invisibleProjectName, exact: true })).toHaveCount(0);
+      await memberPage.getByRole('button', { name: projectName, exact: true }).click();
+      await createDialog.getByRole('button', { name: '取消', exact: true }).click();
 
       const legalSelfTitle = `UAT-AUTH-TASK-LEGAL-SELF-${suffix}`;
       const legalSelf = await actors.teamMember.rest.request<Array<{ id: string; title: string }>>(
@@ -152,8 +157,19 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
           prefer: 'return=representation',
         },
       );
-      expect(legalSelf.status, '普通用户应能合法创建本人 development/dev 任务').toBe(201);
+      expect(legalSelf.status, '组员应能在本组项目创建自己的第一条开发任务').toBe(201);
       expect(legalSelf.data?.[0]?.title).toBe(legalSelfTitle);
+
+      const rows = await createTasks(actors.admin, [
+        'todo', 'jump-done', 'jump-delayed', 'in-progress', 'paused', 'review-owner',
+        'review-delayed', 'review-admin', 'admin-action', 'delete-guard',
+      ].map((name) => ({
+        title: `UAT-AUTH-TASK-${name}-${suffix}`, projectId,
+        developerId: actors.teamMember.developerId, teamId,
+        start: name === 'review-delayed' ? isoDate(-3) : start,
+        due: name === 'review-delayed' ? isoDate(-2) : end,
+      })));
+      const byName = (needle: string) => rows.find((row) => row.title.includes(needle))!;
 
       const forgedRows = [
         { marker: 'TEST-ACTIVITY', task_type: 'dev', work_source: 'test_activity' },

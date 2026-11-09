@@ -51,6 +51,8 @@ interface TaskForm {
   due_date: string;
 }
 
+type TaskCreationProject = Pick<Project, 'id' | 'name' | 'team_id'>;
+
 const emptyForm: TaskForm = {
   title: '',
   description: '',
@@ -131,6 +133,7 @@ export default function Tasks() {
 
   // 弹窗
   const [editing, setEditing] = useState<Task | 'new' | null>(null);
+  const [creationProjects, setCreationProjects] = useState<TaskCreationProject[] | null>(null);
   const [viewing, setViewing] = useState<Task | null>(null);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [formErr, setFormErr] = useState('');
@@ -276,10 +279,24 @@ export default function Tasks() {
 
   // ---------- 增改删 ----------
 
+  useEffect(() => {
+    if (editing !== 'new') return;
+    let cancelled = false;
+    const loadCreationProjects = async () => {
+      const { data, error } = await supabase.rpc('get_task_creation_projects');
+      if (cancelled) return;
+      setCreationProjects(data ?? []);
+      if (error) setFormErr('加载可选项目失败，请关闭弹窗后重试');
+    };
+    loadCreationProjects();
+    return () => { cancelled = true; };
+  }, [editing]);
+
   const openCreate = () => {
     // 负责人默认当前登录人（user 角色锁定为自己，其他角色可改）
     setForm({ ...emptyForm, developer_id: developer?.id ?? '' });
     setFormErr('');
+    setCreationProjects(null);
     setEditing('new');
   };
 
@@ -305,17 +322,17 @@ export default function Tasks() {
     setFormErr('');
     let res;
     if (editing === 'new') {
-      if (!form.project_id) { setSaving(false); return setFormErr('请选择所属项目'); }
+      const project = creationProjects?.find((p) => p.id === form.project_id);
+      if (!project) { setSaving(false); return setFormErr('请选择所属项目'); }
       if (!form.start_date) { setSaving(false); return setFormErr('请选择开始日期'); }
       if (!form.due_date) { setSaving(false); return setFormErr('请选择截止日期'); }
       if (form.due_date < form.start_date) { setSaving(false); return setFormErr('截止日期不能早于开始日期'); }
-      const project = projects.find((p) => p.id === form.project_id);
       res = await supabase.from('tasks').insert({
         title: form.title.trim(),
         description: form.description.trim() || null,
-        project_id: form.project_id,
+        project_id: project.id,
         developer_id: form.developer_id || null,
-        team_id: project?.team_id ?? null,
+        team_id: project.team_id,
         priority: form.priority,
         start_date: form.start_date,
         due_date: form.due_date,
@@ -927,8 +944,9 @@ export default function Tasks() {
               <Select
                 value={form.project_id}
                 onChange={(v) => setForm({ ...form, project_id: v })}
-                options={projects.filter((p) => p.status === 'active').map((p) => ({ value: p.id, label: p.name }))}
-                placeholder="请选择项目"
+                options={(creationProjects ?? []).map((p) => ({ value: p.id, label: p.name }))}
+                disabled={!creationProjects?.length}
+                placeholder={creationProjects === null ? '正在加载项目…' : creationProjects.length ? '请选择项目' : '没有可选项目'}
               />
             </div>
             <div>
@@ -999,7 +1017,7 @@ export default function Tasks() {
           {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">{formErr}</div>}
           <div className="flex justify-end gap-3 pt-1">
             <button className={btnGhost} onClick={() => setEditing(null)}>取消</button>
-            <button className={btnPrimary} disabled={saving} onClick={saveTask}>
+            <button className={btnPrimary} disabled={saving || (editing === 'new' && creationProjects === null)} onClick={saveTask}>
               {saving ? '保存中…' : '保存'}
             </button>
           </div>

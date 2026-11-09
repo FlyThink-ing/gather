@@ -2,7 +2,7 @@
 
 > 适用对象：负责上线的后端/运维同事，默认读者会使用 Linux、SSH 和 Nginx，但**没有接触过 Supabase**。  
 > 适用项目：当前仓库的 React 静态前端 + 自托管 Supabase。  
-> 迁移清单校对日期：2026-10-31（已覆盖 `0001`～`0015`）。Supabase 自托管配置会持续更新，实际安装时应同时查看文末官方文档。
+> 迁移清单已覆盖 `0001`～`0016`。Supabase 自托管配置会持续更新，实际安装时应同时查看文末官方文档。
 
 ---
 
@@ -213,7 +213,7 @@ test -f webpack.config.js
 ls -1 supabase/migrations/*.sql
 ```
 
-迁移文件必须完整显示 `0001_init.sql` 到 `0015_test_hours_precision.sql`，共 15 个按编号连续排列的 SQL 文件；缺少任一文件时停止部署并核对代码版本。
+迁移文件必须完整显示 `0001_init.sql` 到 `0016_task_creation_project_options.sql`，共 16 个按编号连续排列的 SQL 文件；缺少任一文件时停止部署并核对代码版本。
 
 ---
 
@@ -368,10 +368,10 @@ docker compose logs --tail 100 realtime
 `supabase/migrations` 中的 SQL 不只是建表，还包含 RLS、业务触发器、RPC、审批规则和项目驾驶舱。后一个文件依赖前一个文件，必须严格执行：
 
 ```text
-0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014 → 0015
+0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014 → 0015 → 0016
 ```
 
-最后四个迁移分别完成以下变更：
+最近的迁移包括以下变更：
 
 | 文件 | 主要作用 |
 | --- | --- |
@@ -379,6 +379,7 @@ docker compose logs --tail 100 realtime
 | `0013_api_table_grants.sql` | 为 PostgREST 使用的数据库角色补齐表权限；行级安全策略仍限制实际可访问的行。 |
 | `0014_task_insert_returning_visibility.sql` | 调整任务 SELECT 策略，使获准创建的任务可在同一请求中返回其记录，同时保持业务可见范围。 |
 | `0015_test_hours_precision.sql` | 更新测试资源汇总、测试中心和测试计划详情函数，保留工时的小数精度。 |
+| `0016_task_creation_project_options.sql` | 允许组员在本组进行中的项目下创建第一条本人开发任务，并提供新建任务的项目候选接口。 |
 
 这些脚本不是为反复执行设计的。新数据库只执行一次；已存在数据库升级时只执行尚未执行的新编号。不要看到报错后从 `0001` 全部重跑。
 
@@ -409,6 +410,15 @@ done
 - `ON_ERROR_STOP=1`：任何 SQL 报错立即停止；
 - `-1`：每个文件放在单独事务里，该文件失败就整体回滚；
 - 任何一个文件失败，都不要继续后面的文件，先保存完整错误日志并排查。
+
+已有试用数据库若已执行至 `0015`，备份后从应用目录单独执行 `0016`：
+
+```bash
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -1 \
+  < supabase/migrations/0016_task_creation_project_options.sql
+```
+
+执行成功后，按第 8 节重新构建并发布前端。用尚无该项目任务的组员账号打开“任务管理 → 添加任务”，确认能选到本组进行中的项目并为自己保存任务。
 
 ### 7.3 启用通知实时推送
 
@@ -460,7 +470,7 @@ where pubname='supabase_realtime'
 期望：
 
 - 表清单包含 `projects`、`tasks`、`test_plans`、`test_cycles`、`test_activities`、`test_execution_batches`、`test_construction_works`、`task_approval_audits`、`project_status_events` 等；
-- 第二条输出 `actual_started_at` 和 `completed_at`，证明 `0008` 已执行；还应核对 `0010`～`0015` 的执行记录。函数存在或列存在只能证明部分结构已就位，不能单独证明其最新定义和授权均已应用；
+- 第二条输出 `actual_started_at` 和 `completed_at`，证明 `0008` 已执行；还应核对 `0010`～`0016` 的执行记录。函数存在或列存在只能证明部分结构已就位，不能单独证明其最新定义和授权均已应用；
 - 第三条输出 `1`，证明实时通知已启用。
 
 对 `0012`～`0015`，还应在预发布环境用不同角色做功能验证：项目与任务可见范围及审计（`0012`）、登录用户的表查询/写入权限（`0013`）、创建任务后返回记录（`0014`）、`0.25` 小时等小数工时在测试中心和汇总中正确保留（`0015`）。不要仅凭页面能打开就认定迁移完整。
@@ -1050,7 +1060,7 @@ SUPABASE_ANON_KEY=<ANON_KEY>
 - 禁止无备份升级 Supabase 或执行新迁移。
 - 禁止在不理解影响时执行 `docker compose down -v`、`sh reset.sh`、删除 `volumes/db/data`。
 - 禁止用 `latest` 漂移升级单个 Supabase 镜像。
-- 禁止在生产库盲目重复执行 `0001` 到 `0015`。
+- 禁止在生产库盲目重复执行 `0001` 到 `0016`。
 
 ---
 
@@ -1063,4 +1073,4 @@ SUPABASE_ANON_KEY=<ANON_KEY>
 - [Supabase：新版自托管 API/Auth 密钥](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys)
 - [Docker：Ubuntu 安装 Docker Engine](https://docs.docker.com/engine/install/ubuntu/)
 
-当官方文档与本文在 Supabase 容器名、环境变量或 Compose 文件结构上不一致时，以**本次下载的官方 `.env.example`、Compose 文件和官方文档**为准，同时保持本项目不可变的要求：前端变量名、`0001→0015` 迁移顺序、通知 Realtime publication、RLS、安全端口和备份策略。
+当官方文档与本文在 Supabase 容器名、环境变量或 Compose 文件结构上不一致时，以**本次下载的官方 `.env.example`、Compose 文件和官方文档**为准，同时保持本项目不可变的要求：前端变量名、`0001→0016` 迁移顺序、通知 Realtime publication、RLS、安全端口和备份策略。

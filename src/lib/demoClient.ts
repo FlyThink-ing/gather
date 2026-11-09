@@ -675,6 +675,33 @@ export function createDemoClient() {
     return { patch: p };
   };
 
+  const taskCreationAccess = () => {
+    const role = store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
+    const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
+    const managedDeveloperIds = new Set(
+      store.developer_teams.filter((member) => ledTeamIds.has(member.team_id)).map((member) => member.developer_id),
+    );
+    const canViewProject = (project: Row) =>
+      role === 'admin'
+      || project.owner_id === DEMO_DEV_ID
+      || ledTeamIds.has(project.team_id)
+      || store.tasks.some((task) => task.project_id === project.id && (
+        task.developer_id === DEMO_DEV_ID || managedDeveloperIds.has(task.developer_id)
+      ))
+      || store.test_plans.some((plan) => plan.project_id === project.id && (
+        plan.created_by === DEMO_DEV_ID
+        || store.test_cycles.some((cycle) => cycle.plan_id === plan.id && (
+          cycle.main_tester_id === DEMO_DEV_ID
+          || store.test_cycle_participants.some((participant) => participant.cycle_id === cycle.id && participant.developer_id === DEMO_DEV_ID)
+        ))
+      ));
+    const canUseTeamProject = (project: Row) =>
+      project.status === 'active' && store.developer_teams.some(
+        (member) => member.team_id === project.team_id && member.developer_id === DEMO_DEV_ID,
+      );
+    return { role, managedDeveloperIds, canViewProject, canUseTeamProject };
+  };
+
   class Query implements PromiseLike<{ data: any; error: any }> {
     private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
     private payload: Row | null = null;
@@ -723,31 +750,15 @@ export function createDemoClient() {
             return { data: null, error: { message: '测试活动和测试建设任务只能通过测试中心专用流程创建' } };
           }
 
-          const role = store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
-          const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
-          const managedDeveloperIds = new Set(
-            store.developer_teams.filter((member) => ledTeamIds.has(member.team_id)).map((member) => member.developer_id),
-          );
+          const { role, managedDeveloperIds, canViewProject, canUseTeamProject } = taskCreationAccess();
           const canAssign = row.developer_id === DEMO_DEV_ID || (role === 'manager' && managedDeveloperIds.has(row.developer_id));
           const project = row.project_id ? store.projects.find((item) => item.id === row.project_id) : null;
-          const canViewProject = !row.project_id || !!project && (
-            project.owner_id === DEMO_DEV_ID
-            || ledTeamIds.has(project.team_id)
-            || store.tasks.some((task) => task.project_id === project.id && (
-              task.developer_id === DEMO_DEV_ID || managedDeveloperIds.has(task.developer_id)
-            ))
-            || store.test_plans.some((plan) => plan.project_id === project.id && (
-              plan.created_by === DEMO_DEV_ID
-              || store.test_cycles.some((cycle) => cycle.plan_id === plan.id && (
-                cycle.main_tester_id === DEMO_DEV_ID
-                || store.test_cycle_participants.some((participant) => participant.cycle_id === cycle.id && participant.developer_id === DEMO_DEV_ID)
-              ))
-            ))
-          );
+          const canCreateOwnTeamTask = row.developer_id === DEMO_DEV_ID && project
+            && row.team_id === project.team_id && canUseTeamProject(project);
           if (role !== 'admin' && !canAssign) {
             return { data: null, error: { message: '只能为本人或所带小组的有效成员创建开发任务' } };
           }
-          if (role !== 'admin' && !canViewProject) {
+          if (role !== 'admin' && row.project_id && !(project && canViewProject(project)) && !canCreateOwnTeamTask) {
             return { data: null, error: { message: '无权在不可见项目下创建任务' } };
           }
         }
@@ -1956,6 +1967,17 @@ export function createDemoClient() {
         delayed_done: visible.filter((task) => task.status === 'delayed_done').length,
         overdue: visible.filter((task) => !['done', 'delayed_done'].includes(task.status) && task.due_date < day(0)).length,
       }, error: null };
+    }
+
+    if (name === 'get_task_creation_projects') {
+      const { canViewProject, canUseTeamProject } = taskCreationAccess();
+      return {
+        data: store.projects
+          .filter((project) => project.status === 'active' && (canViewProject(project) || canUseTeamProject(project)))
+          .map(({ id, name, team_id }) => ({ id, name, team_id }))
+          .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+        error: null,
+      };
     }
 
     if (name === 'get_project_summaries') {
