@@ -5,6 +5,8 @@ import { isDemoMode } from '../lib/supabase';
 import Select from '../components/Select';
 import { POSITIONS } from '../lib/types';
 
+const SHOW_REGISTRATION_ENTRY = false;
+
 export default function Login() {
   const { session, signIn, signUp, loading } = useAuth();
   const navigate = useNavigate();
@@ -126,19 +128,21 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="mt-4 text-center text-sm text-slate-500">
-          {mode === 'login' ? '还没有账号？' : '已有账号？'}
-          <button
-            onClick={() => {
-              setMode(mode === 'login' ? 'register' : 'login');
-              setError('');
-              setInfo('');
-            }}
-            className="ml-1 text-brand-500 hover:underline"
-          >
-            {mode === 'login' ? '注册' : '去登录'}
-          </button>
-        </div>
+        {SHOW_REGISTRATION_ENTRY && (
+          <div className="mt-4 text-center text-sm text-slate-500">
+            {mode === 'login' ? '还没有账号？' : '已有账号？'}
+            <button
+              onClick={() => {
+                setMode(mode === 'login' ? 'register' : 'login');
+                setError('');
+                setInfo('');
+              }}
+              className="ml-1 text-brand-500 hover:underline"
+            >
+              {mode === 'login' ? '注册' : '去登录'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
