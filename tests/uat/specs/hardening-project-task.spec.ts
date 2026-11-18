@@ -403,6 +403,75 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
     }
   });
 
+  test('待审核任务从逾期标签、筛选和统计中排除', async ({ browser }, testInfo) => {
+    const keys: AccountKey[] = ['admin', 'teamLead', 'teamMember'];
+    requireDistinctAccounts(keys);
+    const sessions: HardeningSession[] = [];
+    try {
+      const { admin, teamLead, teamMember } = await openActors(browser, String(testInfo.project.use.baseURL), keys, sessions);
+      const suffix = `${uatEnv.runId}-review-timing`;
+      const start = isoDate(-3);
+      const due = isoDate(-2);
+      const teamId = await createTeam(admin, `UAT-审核时间-${suffix}`, teamLead.developerId);
+      await addTeamMember(admin, teamId, teamMember.developerId);
+      const projectId = await createProject(admin, {
+        name: `UAT-审核时间项目-${suffix}`, teamId, ownerId: teamLead.developerId, start, end: isoDate(7),
+      });
+      const before = await rpc<{ overdue: number; pending_my_approval: number }>(teamLead, 'get_dashboard_task_counts');
+      expect(before.status).toBe(200);
+      const [submitted, open] = await createTasks(admin, ['待审核', '尚未提交'].map((label) => ({
+        title: `UAT-${label}-${suffix}`, projectId, developerId: teamMember.developerId, teamId, start, due,
+      })));
+      await move(teamMember, submitted.id, 'in_progress');
+      const submission = await patchTask(teamMember, submitted.id, { status: 'review', delay_note: 'UAT 验证逾期后提交' });
+      expect(submission.data?.[0]?.status).toBe('review');
+      await move(teamMember, open.id, 'in_progress');
+
+      const counts = await rpc<{ overdue: number; pending_my_approval: number }>(teamLead, 'get_dashboard_task_counts');
+      expect(counts.data).toMatchObject({
+        overdue: before.data!.overdue + 1,
+        pending_my_approval: before.data!.pending_my_approval + 1,
+      });
+      const filters = [
+        { filter: { p_timing: 'overdue' }, expectedId: open.id },
+        { filter: { p_preset: 'overdue' }, expectedId: open.id },
+        { filter: { p_preset: 'pending_my_approval' }, expectedId: submitted.id },
+      ];
+      for (const { filter, expectedId } of filters) {
+        const result = await rpc<{ items: Array<{ id: string }>; total: number }>(teamLead, 'list_tasks', listTasksBody({
+          p_project_id: projectId, ...filter,
+        }));
+        expect(result.data?.total).toBe(1);
+        expect(result.data?.items.map(({ id }) => id)).toEqual([expectedId]);
+      }
+
+      const summaries = await rpc<Array<{ id: string; review_count: number; overdue_count: number }>>(teamLead, 'get_project_summaries');
+      expect(summaries.data?.find(({ id }) => id === projectId)).toMatchObject({ review_count: 1, overdue_count: 1 });
+      const cockpit = await rpc<{ people: unknown[] }>(teamLead, 'get_project_cockpit', { p_project_id: projectId });
+      expect(cockpit.data?.people).toContainEqual(expect.objectContaining({
+        developer_id: teamMember.developerId, review_task_count: 1, overdue_task_count: 1,
+      }));
+
+      await teamMember.page.goto(`/#/tasks?scope=all&project=${projectId}`);
+      const submittedRow = teamMember.page.locator(`#task-row-${submitted.id}`);
+      await expect(submittedRow.getByText('待审核', { exact: true })).toBeVisible();
+      await expect(submittedRow.getByText('已逾期', { exact: true })).toHaveCount(0);
+      await expect(teamMember.page.locator(`#task-row-${open.id}`).getByText('已逾期', { exact: true })).toBeVisible();
+
+      await teamLead.page.goto('/#/');
+      await teamLead.page.reload();
+      const overdueCard = teamLead.page.getByRole('button', { name: /^逾期/ });
+      await expect(overdueCard).toHaveText(new RegExp(`^逾期\\s*${counts.data!.overdue}$`));
+      await overdueCard.click();
+      await expect(teamLead.page).toHaveURL(/#\/tasks\?scope=all&preset=overdue/);
+
+      const approval = await patchTask(teamLead, submitted.id, { status: 'done' });
+      expect(approval.data?.[0]?.status).toBe('delayed_done');
+    } finally {
+      await closeHardeningSessions(sessions);
+    }
+  });
+
   test('COUNT-REVIEW-01 + NAV-METRIC-01 待我审批计数、ID 与键盘导航一致', async ({ browser }, testInfo) => {
     const keys: AccountKey[] = ['admin', 'teamLead', 'crossGroupOwner', 'teamMember'];
     requireDistinctAccounts(keys);

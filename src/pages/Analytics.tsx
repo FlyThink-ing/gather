@@ -199,7 +199,7 @@ export default function Analytics() {
     数量: scoped.filter((t) => t.priority === p).length,
   }));
 
-  // 项目进度（按完成率排序，分段：完成/进行中/审核中/其他）
+  // 项目进度（按完成率排序，分段：完成/进行中/待审核/其他）
   const projectProgress = projects
     .map((p) => {
       const mine = scoped.filter((t) => t.project_id === p.id);
@@ -254,7 +254,7 @@ export default function Analytics() {
     {
       label: '逾期风险',
       value: `${overdueNow}`,
-      note: overdueNow > 0 ? '未完成且已超期，需立即跟进' : '当前没有逾期任务',
+      note: overdueNow > 0 ? '任务已超过截止日期，需跟进' : '当前没有逾期任务',
       icon: <AlertTriangle size={18} />,
       cls: overdueNow > 0 ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400' : 'bg-slate-500/15 text-slate-500 dark:text-slate-400',
     },
@@ -283,7 +283,7 @@ export default function Analytics() {
   const segLegend = [
     { label: '已完成', color: STATUS_COLOR.done },
     { label: '进行中', color: STATUS_COLOR.in_progress },
-    { label: '审核中', color: STATUS_COLOR.review },
+    { label: '待审核', color: STATUS_COLOR.review },
     { label: '待处理/挂起', color: STATUS_COLOR.todo },
   ];
 
@@ -437,7 +437,7 @@ export default function Analytics() {
                     </div>
                     <div
                       className="flex h-2.5 gap-0.5 overflow-hidden rounded-full"
-                      title={`已完成 ${x.done} · 进行中 ${x.doing} · 审核中 ${x.reviewing} · 待处理/挂起 ${x.rest}`}
+                      title={`已完成 ${x.done} · 进行中 ${x.doing} · 待审核 ${x.reviewing} · 待处理/挂起 ${x.rest}`}
                     >
                       {x.done > 0 && <div className="rounded-full" style={{ flex: x.done, background: STATUS_COLOR.done }} />}
                       {x.doing > 0 && <div className="rounded-full" style={{ flex: x.doing, background: STATUS_COLOR.in_progress }} />}

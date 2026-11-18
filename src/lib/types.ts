@@ -601,7 +601,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   in_progress: '进行中',
   paused: '已挂起',
   testing: '测试中',
-  review: '审核中',
+  review: '待审核',
   done: '已完成',
   delayed_done: '延期完成',
 };

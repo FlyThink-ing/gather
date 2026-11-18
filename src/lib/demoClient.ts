@@ -10,6 +10,8 @@
  * 映射清单见 supabase/migrations/README.md。
  */
 
+import { isTaskOverdue } from './workload';
+
 type Row = Record<string, any>;
 type Store = Record<string, Row[]>;
 
@@ -120,6 +122,7 @@ const day = (offset: number) => {
   d.setDate(d.getDate() + offset);
   return d.toISOString().slice(0, 10);
 };
+const isOverdue = ({ status, due_date, completed_at }: Row) => isTaskOverdue({ status, due_date, completed_at });
 
 function seed(): Store {
   const devs: Row[] = [
@@ -937,7 +940,7 @@ export function createDemoClient() {
       test_task_total: testTasks.length,
       test_round_total: usesProjectCycles ? projectCycles.length : rounds.length,
       review_count: tasks.filter((task) => task.status === 'review').length,
-      overdue_count: tasks.filter((task) => !completed(task) && task.due_date && task.due_date < day(0)).length,
+      overdue_count: tasks.filter(isOverdue).length,
       testing_active_count: tasks.filter((task) =>
         (task.task_type === 'dev' && task.status === 'testing') ||
         (task.task_type === 'test' && !completed(task) && !task.test_result)
@@ -1024,7 +1027,7 @@ export function createDemoClient() {
       current[task.task_type === 'test' ? 'test_task_count' : 'dev_task_count'] += 1;
       if (['done', 'delayed_done'].includes(task.status)) current.completed_task_count += 1;
       if (task.status === 'review') current.review_task_count += 1;
-      if (!['done', 'delayed_done'].includes(task.status) && task.due_date && task.due_date < day(0)) current.overdue_task_count += 1;
+      if (isOverdue(task)) current.overdue_task_count += 1;
       current.actual_effort_hours += taskHours(task.id);
       peopleMap.set(key, current);
     }
@@ -1969,7 +1972,7 @@ export function createDemoClient() {
         pending_my_approval: visible.filter((task) => task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID).length,
         completed: visible.filter((task) => task.status === 'done').length,
         delayed_done: visible.filter((task) => task.status === 'delayed_done').length,
-        overdue: visible.filter((task) => !['done', 'delayed_done'].includes(task.status) && task.due_date < day(0)).length,
+        overdue: visible.filter(isOverdue).length,
       }, error: null };
     }
 
@@ -2014,7 +2017,7 @@ export function createDemoClient() {
         if (params.p_team_id && task.team_id !== params.p_team_id) return false;
         if (params.p_assignee === 'unassigned' && task.developer_id) return false;
         if (params.p_assignee && params.p_assignee !== 'unassigned' && task.developer_id !== params.p_assignee) return false;
-        if (params.p_timing === 'overdue' && (completed(task) || !task.due_date || task.due_date >= day(0))) return false;
+        if (params.p_timing === 'overdue' && !isOverdue(task)) return false;
         if (params.p_timing === 'delayed' && task.status !== 'delayed_done') return false;
         if (params.p_preset === 'testing_active' && !(
           (task.task_type === 'dev' && task.status === 'testing') ||
@@ -2024,7 +2027,7 @@ export function createDemoClient() {
         if (params.p_preset === 'in_progress' && task.status !== 'in_progress') return false;
         if (params.p_preset === 'completed' && task.status !== 'done') return false;
         if (params.p_preset === 'delayed_done' && task.status !== 'delayed_done') return false;
-        if (params.p_preset === 'overdue' && (completed(task) || !task.due_date || task.due_date >= day(0))) return false;
+        if (params.p_preset === 'overdue' && !isOverdue(task)) return false;
         if (params.p_result && (task.task_type !== 'test' || task.test_result !== params.p_result)) return false;
         if (params.p_blocked != null) {
           const matchesBlocked = (store.test_rounds ?? []).some((round) => round.test_task_id === task.id && !!round.blocked === !!params.p_blocked);

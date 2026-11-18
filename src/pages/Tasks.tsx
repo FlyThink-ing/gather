@@ -1061,7 +1061,7 @@ export default function Tasks() {
           </p>
           <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
             {confirmSubmit && requiresProjectApproval(confirmSubmit)
-              ? `该任务属于项目，提交后将进入“审核中”，等待项目负责人「${devName(projects.find((p) => p.id === confirmSubmit.project_id)?.owner_id ?? null)}」审批。`
+              ? `该任务属于项目，提交后将进入“待审核”，等待项目负责人「${devName(projects.find((p) => p.id === confirmSubmit.project_id)?.owner_id ?? null)}」审批。`
               : '该任务无项目归属，确认后将直接完成并锁定。'}
           </p>
           <div className="flex justify-end gap-3">

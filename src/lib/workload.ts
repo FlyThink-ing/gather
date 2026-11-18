@@ -41,16 +41,17 @@ export function actualDays(segs: WorkSegment[]): number {
   return days.size;
 }
 
-export const isUnfinished = (t: Task) => t.status !== 'done' && t.status !== 'delayed_done';
+export const isUnfinished = (t: Pick<Task, 'status'>) => t.status !== 'done' && t.status !== 'delayed_done';
 
 export type TaskTimingState = 'overdue' | 'delayed' | null;
+type TaskTimingFields = Pick<Task, 'status' | 'due_date' | 'completed_at'>;
 
 /**
- * 时间状态与任务/测试结果分离：
- * overdue = 尚未完成且已超过截止日期；delayed = 完成时间超过截止日期。
+ * 待审核任务已提交，等待审批期间不计入逾期。
+ * overdue = 执行阶段超过截止日期；delayed = 完成时间超过截止日期。
  */
-export const taskTimingState = (t: Task): TaskTimingState => {
-  if (!t.due_date) return null;
+export const taskTimingState = (t: TaskTimingFields): TaskTimingState => {
+  if (t.status === 'review' || !t.due_date) return null;
   const completedDate = t.completed_at?.slice(0, 10);
   if (t.status === 'delayed_done' || (completedDate && completedDate > t.due_date)) return 'delayed';
   const today = new Date().toISOString().slice(0, 10);
@@ -58,7 +59,7 @@ export const taskTimingState = (t: Task): TaskTimingState => {
   return null;
 };
 
-export const isTaskOverdue = (t: Task) => taskTimingState(t) === 'overdue';
+export const isTaskOverdue = (t: TaskTimingFields) => taskTimingState(t) === 'overdue';
 
 export interface Workload {
   score: number;
