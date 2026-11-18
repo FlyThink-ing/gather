@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useNavigate } from 'react-router-dom';
 import { Filter, EyeOff, Eye, ArrowLeftRight } from 'lucide-react';
 import Select from './Select';
@@ -194,7 +195,9 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
             onChange={setFStatus}
             options={[
               { value: '', label: '全部状态' },
-              ...(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+              ...(Object.keys(STATUS_LABEL) as TaskStatus[])
+                .filter((s) => testingFeaturesEnabled || s !== 'testing')
+                .map((s) => ({ value: s, label: STATUS_LABEL[s] })),
             ]}
           />
         </div>
@@ -366,15 +369,17 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
         {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
           <span key={s} className="flex items-center gap-1.5">
             <span className={`h-3 w-5 rounded bg-gradient-to-r ${STATUS_GRADIENT[s]}`} />
-            {STATUS_LABEL[s]}
+            {taskStatusLabel(s)}
           </span>
         ))}
         <span className="flex items-center gap-1.5">
           <span className="h-3 w-5 rounded bg-slate-300 ring-2 ring-orange-500 dark:bg-slate-700" /> 逾期/延期
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className={`h-3 w-5 rounded bg-gradient-to-r ${TEST_RESULT_GRADIENT.fail}`} /> 测试不通过
-        </span>
+        {testingFeaturesEnabled && (
+          <span className="flex items-center gap-1.5">
+            <span className={`h-3 w-5 rounded bg-gradient-to-r ${TEST_RESULT_GRADIENT.fail}`} /> 测试不通过
+          </span>
+        )}
         <span className="flex items-center gap-1.5">
           <span className="h-1.5 w-5 rounded-full bg-emerald-500 dark:bg-emerald-400" /> 实际投入
         </span>
@@ -426,7 +431,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
             )}
             <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[hover.task.status]}`}>
-                {STATUS_LABEL[hover.task.status]}
+                {taskStatusLabel(hover.task.status)}
               </span>
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY_BADGE[hover.task.priority]}`}>
                 {PRIORITY_LABEL[hover.task.priority]}

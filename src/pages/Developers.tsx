@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, BadgeCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { isVisibleTask, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
@@ -10,6 +11,8 @@ import { POSITIONS, type Developer, type Team, type Task } from '../lib/types';
 import { calcWorkload, isUnfinished } from '../lib/workload';
 
 interface DevTeam { developer_id: string; team_id: string }
+
+const testingPositions = ['测试工程师', '自动化测试工程师'];
 
 export default function Developers() {
   const { role } = useAuth();
@@ -138,7 +141,7 @@ export default function Developers() {
             </thead>
             <tbody>
               {developers.map((d) => {
-                const mine = tasks.filter((t) => t.developer_id === d.id);
+                const mine = tasks.filter((t) => t.developer_id === d.id && isVisibleTask(t));
                 const wl = calcWorkload(mine);
                 const groups = teamsOf(d.id);
                 return (
@@ -239,7 +242,8 @@ export default function Developers() {
             <Select
               value={form.position}
               onChange={(v) => setForm({ ...form, position: v })}
-              options={POSITIONS.map((p) => ({ value: p, label: p }))}
+              options={POSITIONS.filter((p) => testingFeaturesEnabled || !testingPositions.includes(p) || (editing !== 'new' && p === editing?.position))
+                .map((p) => ({ value: p, label: p }))}
             />
           </div>
           {editing === 'new' && (

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isDemoMode } from '../lib/supabase';
+import { testingFeaturesEnabled } from '../lib/testingFeatures';
 import { getTheme, applyTheme, type Theme } from '../lib/theme';
 import { ROLE_LABEL, type Role } from '../lib/types';
 import NotificationBell from './NotificationBell';
@@ -32,7 +33,7 @@ const MENU: MenuItem[] = [
   { to: '/developers', label: '开发人员', icon: <Users size={18} /> },
   { to: '/teams', label: '小组管理', icon: <UsersRound size={18} />, roles: ['admin'] },
   { to: '/tasks', label: '任务管理', icon: <ListTodo size={18} /> },
-  { to: '/testing', label: '测试中心', icon: <FlaskConical size={18} /> },
+  ...(testingFeaturesEnabled ? [{ to: '/testing', label: '测试中心', icon: <FlaskConical size={18} /> }] : []),
   { to: '/analytics', label: '数据分析', icon: <LineChart size={18} />, roles: ['admin', 'manager'] },
   { to: '/user-roles', label: '权限管理', icon: <ShieldCheck size={18} />, roles: ['admin'] },
 ];

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { Bell } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import { AlertDialog } from './ConfirmDialog';
 import type { Notification } from '../lib/types';
@@ -16,6 +17,39 @@ const TYPE_TEXT: Record<string, (p: Record<string, unknown>) => string> = {
   test_passed: (p) => `「${p.title}」测试通过，关联开发任务已进入项目审批`,
   test_failed: (p) => `「${p.title}」测试不通过：${p.reason ?? ''}`,
 };
+
+const NOTIFICATION_LIMIT = 20;
+const testingNotificationType = /^(?:test_|project_test_|no_test_)/;
+const testingTaskTitle = /^(?:【测试】|\[测试活动\]|\[测试建设\])/;
+
+async function loadNotifications(recipientId: string) {
+  const visible: Notification[] = [];
+  for (let offset = 0; visible.length < NOTIFICATION_LIMIT; offset += NOTIFICATION_LIMIT) {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('recipient_id', recipientId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + NOTIFICATION_LIMIT - 1);
+    if (error) return { data: [], error };
+    const rows = (data as Notification[]) ?? [];
+    if (testingFeaturesEnabled) return { data: rows, error: null };
+
+    const ordinary = rows.filter(({ type, payload }) =>
+      !testingNotificationType.test(type) && (!type.startsWith('task_') || !testingTaskTitle.test(String(payload.title ?? ''))));
+    // 通用的任务指派等通知也可能关联测试任务。
+    const taskIds = ordinary.flatMap(({ type, payload }) =>
+      type.startsWith('task_') && typeof payload.task_id === 'string' ? [payload.task_id] : []);
+    const testTasks = taskIds.length > 0
+      ? await supabase.from('tasks').select('id').eq('task_type', 'test').in('id', taskIds)
+      : { data: [], error: null };
+    if (testTasks.error) return { data: [], error: testTasks.error };
+    const hiddenTaskIds = new Set((testTasks.data ?? []).map(({ id }) => id));
+    visible.push(...ordinary.filter(({ payload }) => !hiddenTaskIds.has(payload.task_id)));
+    if (rows.length < NOTIFICATION_LIMIT) break;
+  }
+  return { data: visible.slice(0, NOTIFICATION_LIMIT), error: null };
+}
 
 interface PopupPosition {
   top: number;
@@ -36,14 +70,9 @@ export default function NotificationBell() {
 
   const load = useCallback(async () => {
     if (!developer) return null;
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('recipient_id', developer.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
+    const { data, error } = await loadNotifications(developer.id);
     if (error) return error.message;
-    setItems((data as Notification[]) ?? []);
+    setItems(data);
     return null;
   }, [developer]);
 
@@ -107,11 +136,14 @@ export default function NotificationBell() {
     if (!developer || unread === 0 || marking) return;
     setMarking(true);
     try {
-      const { error } = await supabase
+      const query = supabase
         .from('notifications')
         .update({ is_read: true })
         .eq('recipient_id', developer.id)
         .eq('is_read', false);
+      const { error } = await (testingFeaturesEnabled
+        ? query
+        : query.in('id', items.filter((item) => !item.is_read).map((item) => item.id)));
       if (error) {
         setNotice(error.message);
         return;

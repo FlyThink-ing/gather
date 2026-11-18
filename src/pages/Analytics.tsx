@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import { CheckCircle2, AlertTriangle, Clock, Timer } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Select from '../components/Select';
@@ -55,14 +56,15 @@ export default function Analytics() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const taskQuery = supabase.from('tasks').select('*');
     const [t, d, p, tm, dt, ws, tr] = await Promise.all([
-      supabase.from('tasks').select('*'),
+      testingFeaturesEnabled ? taskQuery : taskQuery.eq('task_type', 'dev'),
       supabase.from('developers').select('*').eq('is_active', true).order('name'),
       supabase.from('projects').select('*'),
       supabase.from('teams').select('*'),
       supabase.from('developer_teams').select('*'),
       supabase.from('task_work_segments').select('*'),
-      supabase.from('test_rounds').select('*'),
+      testingFeaturesEnabled ? supabase.from('test_rounds').select('*') : { data: [] },
     ]);
     setTasks((t.data as Task[]) ?? []);
     setDevelopers((d.data as Developer[]) ?? []);
@@ -188,7 +190,7 @@ export default function Analytics() {
   // 状态 / 优先级分布
   const statusDist = (Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => ({
     status: s,
-    label: STATUS_LABEL[s],
+    label: taskStatusLabel(s),
     count: scoped.filter((t) => t.status === s).length,
   }));
   const priorityDist = (Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => ({
@@ -291,17 +293,19 @@ export default function Analytics() {
         title="数据分析"
         actions={
           <div className="flex items-center gap-2">
-            <Select
-              size="sm"
-              className="w-24"
-              value={fType}
-              onChange={setFType}
-              options={[
-                { value: '', label: '全部类型' },
-                { value: 'dev', label: '开发' },
-                { value: 'test', label: '测试' },
-              ]}
-            />
+            {testingFeaturesEnabled && (
+              <Select
+                size="sm"
+                className="w-24"
+                value={fType}
+                onChange={setFType}
+                options={[
+                  { value: '', label: '全部类型' },
+                  { value: 'dev', label: '开发' },
+                  { value: 'test', label: '测试' },
+                ]}
+              />
+            )}
             <Select
               size="sm"
               className="w-28"
@@ -456,63 +460,65 @@ export default function Analytics() {
       </div>
 
       {/* 测试质量（v2.5） */}
-      <div className={`${card} mt-4`}>
-        <h2 className={cardTitle}>测试质量</h2>
-        {testStats.total === 0 ? (
-          <div className="py-6 text-center text-sm text-slate-500">暂无测试任务（开发任务提测后自动生成）</div>
-        ) : (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-              <QualityValue label="测试任务" value={testStats.total} />
-              <QualityValue label="进行中" value={testStats.active} tone="cyan" />
-              <QualityValue label="通过" value={testStats.passed} tone="success" />
-              <QualityValue label="打回（不通过）" value={testStats.failed} tone="danger" />
-              <div className="min-w-56 flex-1">
-                <div className="mb-1 flex justify-between text-xs">
-                  <span className="text-slate-500">打回率（不通过 / 已出结论）</span>
-                  <span className="font-medium text-slate-800 dark:text-slate-200">
-                    {testStats.failRate != null ? `${testStats.failRate}%` : '—'}
+      {testingFeaturesEnabled && (
+        <div className={`${card} mt-4`}>
+          <h2 className={cardTitle}>测试质量</h2>
+          {testStats.total === 0 ? (
+            <div className="py-6 text-center text-sm text-slate-500">暂无测试任务（开发任务提测后自动生成）</div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                <QualityValue label="测试任务" value={testStats.total} />
+                <QualityValue label="进行中" value={testStats.active} tone="cyan" />
+                <QualityValue label="通过" value={testStats.passed} tone="success" />
+                <QualityValue label="打回（不通过）" value={testStats.failed} tone="danger" />
+                <div className="min-w-56 flex-1">
+                  <div className="mb-1 flex justify-between text-xs">
+                    <span className="text-slate-500">打回率（不通过 / 已出结论）</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-200">
+                      {testStats.failRate != null ? `${testStats.failRate}%` : '—'}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    <div className="h-full rounded-full bg-red-500 transition-all" style={{ width: `${testStats.failRate ?? 0}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">禅道测试汇总</h3>
+                  <span className="text-xs text-slate-500">
+                    覆盖 {testStats.coveredConclusions} / {testStats.concludedCount} 个已结论任务
+                    {testStats.coverage != null ? `（${testStats.coverage}%）` : ''}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                  <div className="h-full rounded-full bg-red-500 transition-all" style={{ width: `${testStats.failRate ?? 0}%` }} />
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-9">
+                  <QualityMetric label="标准轮次" value={testStats.caseBasedRounds} />
+                  <QualityMetric label="快速验证轮次" value={testStats.exploratoryRounds} />
+                  <QualityMetric label="计划用例" value={testStats.plannedCases} />
+                  <QualityMetric label="实际执行" value={testStats.executedCases} note={testStats.executionRate != null ? `执行率 ${testStats.executionRate}%` : '执行率 —'} />
+                  <QualityMetric label="新增 Bug" value={testStats.bugs} />
+                  <QualityMetric label="Bug / 百用例" value={testStats.bugPer100 ?? '—'} />
+                  <QualityMetric label="Reopen" value={testStats.reopen} />
+                  <QualityMetric label="阻断轮次" value={testStats.blocked} danger={testStats.blocked > 0} />
+                  <QualityMetric label="汇总覆盖率" value={testStats.coverage != null ? `${testStats.coverage}%` : '—'} />
                 </div>
+                {testStats.coveredConclusions < testStats.concludedCount && (
+                  <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                    历史未录入汇总的测试任务不按 0 参与用例和 Bug 统计。
+                  </p>
+                )}
+                {testStats.exploratoryRounds > 0 && (
+                  <p className="mt-2 text-xs text-violet-600 dark:text-violet-400">
+                    快速 / 探索性验证计入结论、Bug、Reopen 和阻断统计，但不计入用例执行率与每百用例 Bug 数。
+                  </p>
+                )}
               </div>
             </div>
-
-            <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">禅道测试汇总</h3>
-                <span className="text-xs text-slate-500">
-                  覆盖 {testStats.coveredConclusions} / {testStats.concludedCount} 个已结论任务
-                  {testStats.coverage != null ? `（${testStats.coverage}%）` : ''}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-9">
-                <QualityMetric label="标准轮次" value={testStats.caseBasedRounds} />
-                <QualityMetric label="快速验证轮次" value={testStats.exploratoryRounds} />
-                <QualityMetric label="计划用例" value={testStats.plannedCases} />
-                <QualityMetric label="实际执行" value={testStats.executedCases} note={testStats.executionRate != null ? `执行率 ${testStats.executionRate}%` : '执行率 —'} />
-                <QualityMetric label="新增 Bug" value={testStats.bugs} />
-                <QualityMetric label="Bug / 百用例" value={testStats.bugPer100 ?? '—'} />
-                <QualityMetric label="Reopen" value={testStats.reopen} />
-                <QualityMetric label="阻断轮次" value={testStats.blocked} danger={testStats.blocked > 0} />
-                <QualityMetric label="汇总覆盖率" value={testStats.coverage != null ? `${testStats.coverage}%` : '—'} />
-              </div>
-              {testStats.coveredConclusions < testStats.concludedCount && (
-                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                  历史未录入汇总的测试任务不按 0 参与用例和 Bug 统计。
-                </p>
-              )}
-              {testStats.exploratoryRounds > 0 && (
-                <p className="mt-2 text-xs text-violet-600 dark:text-violet-400">
-                  快速 / 探索性验证计入结论、Bug、Reopen 和阻断统计，但不计入用例执行率与每百用例 Bug 数。
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* 团队成员效率 */}
       <div className={`${card} mt-4`}>

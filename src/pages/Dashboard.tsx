@@ -4,6 +4,7 @@ import {
   ListTodo, LoaderCircle, Clock, CheckCircle2, CalendarClock, AlertTriangle, FlaskConical,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import GanttChart from '../components/GanttChart';
@@ -25,8 +26,9 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const taskQuery = supabase.from('tasks').select('*');
     const [t, d, p, tm, dt, ws, countResult] = await Promise.all([
-      supabase.from('tasks').select('*'),
+      testingFeaturesEnabled ? taskQuery : taskQuery.eq('task_type', 'dev'),
       supabase.from('developers').select('*').eq('is_active', true).order('name'),
       supabase.from('projects').select('*'),
       supabase.from('teams').select('*'),
@@ -55,7 +57,7 @@ export default function Dashboard() {
   const cards = [
     { label: '总任务', value: counts?.total ?? 0, icon: <ListTodo size={18} />, cls: 'bg-slate-500/15 text-slate-700 dark:text-slate-300', preset: '' },
     { label: '进行中', value: counts?.in_progress ?? 0, icon: <LoaderCircle size={18} />, cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400', preset: 'in_progress' },
-    { label: '测试中', value: counts?.testing_active ?? 0, icon: <FlaskConical size={18} />, cls: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400', preset: 'testing_active' },
+    ...(testingFeaturesEnabled ? [{ label: '测试中', value: counts?.testing_active ?? 0, icon: <FlaskConical size={18} />, cls: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400', preset: 'testing_active' }] : []),
     { label: '待我审批', value: counts?.pending_my_approval ?? 0, icon: <Clock size={18} />, cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', preset: 'pending_my_approval' },
     { label: '已完成', value: counts?.completed ?? 0, icon: <CheckCircle2 size={18} />, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', preset: 'completed' },
     { label: '延期完成', value: counts?.delayed_done ?? 0, icon: <CalendarClock size={18} />, cls: 'bg-orange-500/15 text-orange-600 dark:text-orange-400', preset: 'delayed_done' },
@@ -77,7 +79,7 @@ export default function Dashboard() {
       <PageHeader title="项目概览" />
 
       {/* 统计卡片 */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+      <div className={`grid grid-cols-2 gap-4 md:grid-cols-4 ${testingFeaturesEnabled ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
         {cards.map((c) => (
           <button key={c.label} type="button" onClick={() => navigate(`/tasks?scope=all${c.preset ? `&preset=${c.preset}` : ''}`)} className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-400 hover:bg-brand-500/5 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between">

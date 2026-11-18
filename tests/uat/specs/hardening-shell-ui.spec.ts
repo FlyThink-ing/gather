@@ -146,6 +146,7 @@ test.describe('统一反馈与通知浮层 @hardening @full', () => {
   });
 
   test('UI-MODAL-FOCUS-01 多字段 Modal 连续状态更新不丢失第二字段焦点和值', async ({ browser }, testInfo) => {
+    test.skip(!uatEnv.testingFeaturesEnabled, '需要启用测试功能的验收站点');
     const sessions: HardeningSession[] = [];
     try {
       const admin = await openHardeningSession(browser, String(testInfo.project.use.baseURL), 'admin');

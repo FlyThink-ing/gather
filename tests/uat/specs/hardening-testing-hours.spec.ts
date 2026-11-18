@@ -78,18 +78,22 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
         expect(detail.status, `${actor.key} 在建立计划关系前不得深链查看`).toBeGreaterThanOrEqual(400);
       }
 
-      await actors.crossGroupOwner.page.goto(`/#/testing/plans/${planId}`);
-      await expect(actors.crossGroupOwner.page.getByRole('heading', { name: title })).toBeVisible();
-      await expect(actors.crossGroupOwner.page.getByText('只读访问')).toBeVisible();
-      await expect(actors.crossGroupOwner.page.getByRole('button', { name: '确认排期' })).toHaveCount(0);
+      if (uatEnv.testingFeaturesEnabled) {
+        await actors.crossGroupOwner.page.goto(`/#/testing/plans/${planId}`);
+        await expect(actors.crossGroupOwner.page.getByRole('heading', { name: title })).toBeVisible();
+        await expect(actors.crossGroupOwner.page.getByText('只读访问')).toBeVisible();
+        await expect(actors.crossGroupOwner.page.getByRole('button', { name: '确认排期' })).toHaveCount(0);
+      }
       const ownerSchedule = await rpc(actors.crossGroupOwner, 'review_test_schedule', {
         p_cycle_id: cycleId, p_accept: true, p_main_tester_id: actors.testEngineer.developerId,
         p_planned_start: start, p_planned_end: end, p_participants: [], p_reason: 'FORBIDDEN',
       });
       expect(ownerSchedule.status).toBeGreaterThanOrEqual(400);
 
-      await actors.testLead.page.goto(`/#/testing/plans/${planId}`);
-      await expect(actors.testLead.page.getByRole('button', { name: '确认排期' })).toBeVisible();
+      if (uatEnv.testingFeaturesEnabled) {
+        await actors.testLead.page.goto(`/#/testing/plans/${planId}`);
+        await expect(actors.testLead.page.getByRole('button', { name: '确认排期' })).toBeVisible();
+      }
       const schedule = await rpc(actors.testLead, 'review_test_schedule', {
         p_cycle_id: cycleId, p_accept: true, p_main_tester_id: actors.testEngineer.developerId,
         p_planned_start: start, p_planned_end: end,
@@ -278,6 +282,7 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
   });
 
   test('UI-LAYOUT-01 375/768/1280 下活动卡、nowrap 与资源表可访问', async ({ browser }, testInfo) => {
+    test.skip(!uatEnv.testingFeaturesEnabled, '需要启用测试功能的验收站点');
     const keys: AccountKey[] = ['admin', 'testLead', 'testEngineer'];
     requireDistinctAccounts(keys);
     const sessions: HardeningSession[] = [];

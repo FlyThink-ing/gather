@@ -175,10 +175,12 @@ test('外部测试排期、活动、批次、工时、结构化结论退回与�
     );
     expect(finalPlan.data?.[0]?.status).toBe('passed');
 
-    await tester.page.goto(`/#/testing/plans/${planId}`);
-    await expect(tester.page.getByRole('heading', { name: planTitle })).toBeVisible();
-    await expect(tester.page.getByText('系统测试').first()).toBeVisible();
-    await expect(tester.page.getByText('1.0 小时').first()).toBeVisible();
+    if (uatEnv.testingFeaturesEnabled) {
+      await tester.page.goto(`/#/testing/plans/${planId}`);
+      await expect(tester.page.getByRole('heading', { name: planTitle })).toBeVisible();
+      await expect(tester.page.getByText('系统测试').first()).toBeVisible();
+      await expect(tester.page.getByText('1.0 小时').first()).toBeVisible();
+    }
   } finally {
     await Promise.all(sessions.map(({ context }) => context.close()));
   }
@@ -294,13 +296,15 @@ test('测试建设创建、排期、拆分、更新进度、工时与成果确�
       actual_hours: 1,
     });
 
-    await automation.page.goto(`/#/testing/construction/${workId}`);
-    await expect(automation.page.getByRole('heading', { name: title })).toBeVisible();
-    await expect(automation.page.getByText('已完成').first()).toBeVisible();
-    await expect(automation.page.getByText('任务进度', { exact: true }).locator('..')).toContainText('1/1');
-    await expect(automation.page.getByText('计划工时', { exact: true }).locator('..')).toContainText('8.0 小时');
-    await expect(automation.page.getByText('实际工时', { exact: true }).locator('..')).toContainText('1.0 小时');
-    await expect(automation.page.getByRole('heading', { name: '建设任务与实际工时' }).locator('..')).toContainText('8.0 小时 / 1.0 人天 / 1.0 小时 / 0.1 人天');
+    if (uatEnv.testingFeaturesEnabled) {
+      await automation.page.goto(`/#/testing/construction/${workId}`);
+      await expect(automation.page.getByRole('heading', { name: title })).toBeVisible();
+      await expect(automation.page.getByText('已完成').first()).toBeVisible();
+      await expect(automation.page.getByText('任务进度', { exact: true }).locator('..')).toContainText('1/1');
+      await expect(automation.page.getByText('计划工时', { exact: true }).locator('..')).toContainText('8.0 小时');
+      await expect(automation.page.getByText('实际工时', { exact: true }).locator('..')).toContainText('1.0 小时');
+      await expect(automation.page.getByRole('heading', { name: '建设任务与实际工时' }).locator('..')).toContainText('8.0 小时 / 1.0 人天 / 1.0 小时 / 0.1 人天');
+    }
   } finally {
     await Promise.all(sessions.map(({ context }) => context.close()));
   }

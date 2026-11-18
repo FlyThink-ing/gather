@@ -17,6 +17,7 @@ import {
   Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { projectCompletionMessage, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
@@ -197,13 +198,14 @@ export default function Projects() {
     });
     setCompletingId(null);
     if (error) {
-      if (force) return setForceErr(error.message);
+      const message = projectCompletionMessage(error.message);
+      if (force) return setForceErr(message);
       if (role === 'admin') {
         setForceFor(p);
         setForceReason('');
-        setForceErr(error.message);
+        setForceErr(message);
       } else {
-        setNotice(error.message);
+        setNotice(message);
       }
       return;
     }
@@ -313,7 +315,7 @@ export default function Projects() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className={`mt-4 grid gap-3 sm:grid-cols-2 ${testingFeaturesEnabled ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
                 <SummaryBox
                   icon={<CalendarRange size={16} />}
                   label="计划 / 实际周期"
@@ -328,24 +330,30 @@ export default function Projects() {
                   hint="仅统计开发任务"
                   onClick={() => openTasks(p, { type: 'dev' })}
                 />
-                <SummaryBox
-                  icon={<FlaskConical size={16} />}
-                  label="测试任务 / 轮次"
-                  value={`${p.test_task_total} / ${p.test_round_total}`}
-                  hint="任务与测试轮次分开统计"
-                  onClick={() => openTasks(p, { type: 'test' })}
-                />
+                {testingFeaturesEnabled && (
+                  <SummaryBox
+                    icon={<FlaskConical size={16} />}
+                    label="测试任务 / 轮次"
+                    value={`${p.test_task_total} / ${p.test_round_total}`}
+                    hint="任务与测试轮次分开统计"
+                    onClick={() => openTasks(p, { type: 'test' })}
+                  />
+                )}
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+              <div className={`mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 ${testingFeaturesEnabled ? 'xl:grid-cols-8' : ''}`}>
                 <RiskMetric label="待审批" value={p.review_count} tone="amber" onClick={() => openTasks(p, { status: 'review' })} />
-                <RiskMetric label="测试中" value={p.testing_active_count} tone="cyan" onClick={() => openTasks(p, { preset: 'testing_active' })} />
+                {testingFeaturesEnabled && <RiskMetric label="测试中" value={p.testing_active_count} tone="cyan" onClick={() => openTasks(p, { preset: 'testing_active' })} />}
                 <RiskMetric label="已逾期" value={p.overdue_count} tone="orange" onClick={() => openTasks(p, { timing: 'overdue' })} />
                 <RiskMetric label="已完成" value={p.completed_task_count} tone="emerald" onClick={() => openTasks(p, { status: 'done,delayed_done' })} />
                 <RiskMetric label="延期完成" value={p.delayed_done_count} tone="orange" onClick={() => openTasks(p, { status: 'delayed_done' })} />
-                <RiskMetric label="累计 Bug" value={p.cumulative_bug_count} tone="red" onClick={() => navigate(`/projects/${p.id}?section=quality`)} />
-                <RiskMetric label="测试不通过" value={p.failed_round_count} tone="red" onClick={() => openTasks(p, { type: 'test', result: 'fail' })} />
-                <RiskMetric label="阻断轮次" value={p.blocked_round_count} tone="red" onClick={() => openTasks(p, { type: 'test', blocked: '1' })} />
+                {testingFeaturesEnabled && (
+                  <>
+                    <RiskMetric label="累计 Bug" value={p.cumulative_bug_count} tone="red" onClick={() => navigate(`/projects/${p.id}?section=quality`)} />
+                    <RiskMetric label="测试不通过" value={p.failed_round_count} tone="red" onClick={() => openTasks(p, { type: 'test', result: 'fail' })} />
+                    <RiskMetric label="阻断轮次" value={p.blocked_round_count} tone="red" onClick={() => openTasks(p, { type: 'test', blocked: '1' })} />
+                  </>
+                )}
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800">

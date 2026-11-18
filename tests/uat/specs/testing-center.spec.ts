@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { login } from '../support/auth';
 import { requireAccount } from '../support/skip';
+import { uatEnv } from '../support/env';
 
 test.describe('测试中心', () => {
+  test.skip(!uatEnv.testingFeaturesEnabled, '需要启用测试功能的验收站点');
   test('计划、建设、资源三视图与外部测试必填校验 @smoke', async ({ page }) => {
     await login(page, requireAccount('testEngineer'));
     await page.goto('/#/testing');

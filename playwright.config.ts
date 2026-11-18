@@ -23,6 +23,7 @@ export default defineConfig({
   ],
   webServer: localMode ? {
     command: 'npm run start:local',
+    env: { ENABLE_TESTING_FEATURES: String(uatEnv.testingFeaturesEnabled) },
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: true,
     timeout: 120_000,

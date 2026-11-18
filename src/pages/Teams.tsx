@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Crown, X, UserPlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { testingFeaturesEnabled } from '../lib/testingFeatures';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
 import { AlertDialog, ConfirmDialog } from '../components/ConfirmDialog';
@@ -65,7 +66,11 @@ export default function Teams() {
     if (!form.name.trim()) return setFormErr('请填写小组名称');
     setSaving(true);
     setFormErr('');
-    const payload = { name: form.name.trim(), leader_id: form.leader_id || null, is_test_team: form.is_test_team };
+    const payload = {
+      name: form.name.trim(),
+      leader_id: form.leader_id || null,
+      ...(testingFeaturesEnabled ? { is_test_team: form.is_test_team } : {}),
+    };
     const res =
       editing === 'new'
         ? await supabase.from('teams').insert(payload)
@@ -150,7 +155,7 @@ export default function Teams() {
               <div key={t.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-base font-semibold text-slate-900 dark:text-white">{t.name}</h3>
-                  {t.is_test_team && <span className="ml-2 rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-700 dark:text-cyan-300">测试小组</span>}
+                  {testingFeaturesEnabled && t.is_test_team && <span className="ml-2 rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-700 dark:text-cyan-300">测试小组</span>}
                   <div className="flex gap-1.5">
                     <button
                       onClick={() => openEdit(t)}
@@ -240,22 +245,26 @@ export default function Teams() {
                 })),
               ]}
             />
-            <p className="mt-1 text-xs text-slate-500">
-              测试小组组长负责确认测试排期、无需测试申请和最终测试结论；不因此获得项目任务审批权。
-            </p>
+            {testingFeaturesEnabled && (
+              <p className="mt-1 text-xs text-slate-500">
+                测试小组组长负责确认测试排期、无需测试申请和最终测试结论；不因此获得项目任务审批权。
+              </p>
+            )}
           </div>
-          <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={form.is_test_team}
-              onChange={(e) => setForm({ ...form, is_test_team: e.target.checked })}
-            />
-            <span>
-              <span className="font-medium text-slate-900 dark:text-white">标记为测试小组</span>
-              <span className="mt-1 block text-xs text-slate-500">一个组织可配置测试小组；测试组长权限只作用于测试中心。</span>
-            </span>
-          </label>
+          {testingFeaturesEnabled && (
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={form.is_test_team}
+                onChange={(e) => setForm({ ...form, is_test_team: e.target.checked })}
+              />
+              <span>
+                <span className="font-medium text-slate-900 dark:text-white">标记为测试小组</span>
+                <span className="mt-1 block text-xs text-slate-500">一个组织可配置测试小组；测试组长权限只作用于测试中心。</span>
+              </span>
+            </label>
+          )}
           {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">{formErr}</div>}
           <div className="flex justify-end gap-3 pt-1">
             <button className={btnGhost} onClick={() => setEditing(null)}>取消</button>

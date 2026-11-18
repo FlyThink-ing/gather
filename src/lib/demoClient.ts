@@ -705,9 +705,10 @@ export function createDemoClient() {
   class Query implements PromiseLike<{ data: any; error: any }> {
     private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
     private payload: Row | null = null;
-    private filters: { col: string; val: any }[] = [];
+    private filters: ((row: Row) => boolean)[] = [];
     private orderBy: { col: string; asc: boolean } | null = null;
     private limitN: number | null = null;
+    private offset = 0;
     private single = false;
 
     constructor(private table: string) {}
@@ -716,17 +717,20 @@ export function createDemoClient() {
     insert(p: Row) { this.op = 'insert'; this.payload = p; return this; }
     update(p: Row) { this.op = 'update'; this.payload = p; return this; }
     delete() { this.op = 'delete'; return this; }
-    eq(col: string, val: any) { this.filters.push({ col, val }); return this; }
+    eq(col: string, val: any) { this.filters.push((row) => row[col] === val); return this; }
+    in(col: string, values: unknown[]) { this.filters.push((row) => values.includes(row[col])); return this; }
     order(col: string, opts?: { ascending?: boolean }) {
       this.orderBy = { col, asc: opts?.ascending !== false };
       return this;
     }
     limit(n: number) { this.limitN = n; return this; }
+    range(from: number, to: number) { this.offset = from; this.limitN = to - from + 1; return this; }
     maybeSingle() { this.single = true; return this; }
 
     private exec(): { data: any; error: any } {
       const rows = store[this.table] ?? (store[this.table] = []);
-      const matched = () => rows.filter((r) => this.filters.every((f) => r[f.col] === f.val));
+      const matchesFilters = (row: Row) => this.filters.every((filter) => filter(row));
+      const matched = () => rows.filter(matchesFilters);
 
       if (this.op === 'select') {
         let out = matched().slice();
@@ -734,7 +738,7 @@ export function createDemoClient() {
           const { col, asc } = this.orderBy;
           out.sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0) * (asc ? 1 : -1));
         }
-        if (this.limitN != null) out = out.slice(0, this.limitN);
+        if (this.limitN != null) out = out.slice(this.offset, this.offset + this.limitN);
         return { data: this.single ? (out[0] ?? null) : out, error: null };
       }
       if (this.op === 'insert') {
@@ -811,7 +815,7 @@ export function createDemoClient() {
         return { data: null, error: null };
       }
       // delete
-      store[this.table] = rows.filter((r) => !this.filters.every((f) => r[f.col] === f.val));
+      store[this.table] = rows.filter((row) => !matchesFilters(row));
       save();
       return { data: null, error: null };
     }

@@ -77,6 +77,9 @@ export function account(key: AccountKey): UatAccount | null {
 }
 
 export const uatEnv = {
+  get testingFeaturesEnabled() {
+    return process.env.ENABLE_TESTING_FEATURES === 'true';
+  },
   get baseUrl() {
     const value = process.env.UAT_BASE_URL?.trim() ?? '';
     return placeholder.test(value) ? '' : value.replace(/\/$/, '');

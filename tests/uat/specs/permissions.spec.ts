@@ -1,9 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { login } from '../support/auth';
 import { requireAccount } from '../support/skip';
-import type { AccountKey } from '../support/env';
+import { uatEnv, type AccountKey } from '../support/env';
 
-const commonMenu = ['工作台', '项目管理', '开发人员', '任务管理', '测试中心'];
+const commonMenu = ['工作台', '项目管理', '开发人员', '任务管理'];
 
 async function expectMenu(page: Page, visible: string[], hidden: string[]) {
   for (const name of visible) await expect(page.getByRole('link', { name })).toBeVisible();
@@ -18,6 +18,16 @@ for (const matrix of [
   test(`${matrix.key} 菜单与路由权限 @smoke`, async ({ page }) => {
     await login(page, requireAccount(matrix.key));
     await expectMenu(page, matrix.visible, matrix.hidden);
+    const testingLink = page.getByRole('link', { name: '测试中心' });
+    if (uatEnv.testingFeaturesEnabled) {
+      await expect(testingLink).toBeVisible();
+    } else {
+      await expect(testingLink).toHaveCount(0);
+      for (const route of ['/testing', '/testing/plans/legacy', '/testing/construction/legacy', '/prototype/test-flow']) {
+        await page.goto(`/#${route}`);
+        await expect(page).toHaveURL(/#\/dashboard$/);
+      }
+    }
 
     if (matrix.key !== 'admin') {
       await page.goto('/#/teams');

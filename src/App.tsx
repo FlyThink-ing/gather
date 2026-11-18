@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { initTheme } from './lib/theme';
+import { testingFeaturesEnabled } from './lib/testingFeatures';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
@@ -45,10 +46,14 @@ export default function App() {
               }
             />
             <Route path="/tasks" element={<Tasks />} />
-            <Route path="/testing" element={<TestingCenter />} />
-            <Route path="/testing/plans/:id" element={<TestPlanDetail />} />
-            <Route path="/testing/construction/:id" element={<TestConstructionDetail />} />
-            <Route path="/prototype/test-flow" element={<TestFlowPrototype />} />
+            {testingFeaturesEnabled && (
+              <>
+                <Route path="/testing" element={<TestingCenter />} />
+                <Route path="/testing/plans/:id" element={<TestPlanDetail />} />
+                <Route path="/testing/construction/:id" element={<TestConstructionDetail />} />
+                <Route path="/prototype/test-flow" element={<TestFlowPrototype />} />
+              </>
+            )}
             <Route
               path="/analytics"
               element={

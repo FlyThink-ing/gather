@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Pencil, Lock, Search, Play, Pause, Send, Check, Undo2, ChevronLeft, ChevronRight, Link2, Eye, ExternalLink, ShieldAlert, ArrowLeft, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/Modal';
@@ -67,7 +68,27 @@ export default function Tasks() {
   const { role, developer } = useAuth();
   const isAdmin = role === 'admin';
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [urlParams, setSearchParams] = useSearchParams();
+  const searchParams = useMemo(() => {
+    if (testingFeaturesEnabled) return urlParams;
+
+    const next = new URLSearchParams(urlParams);
+    if (next.get('type') !== 'dev') next.delete('type');
+    for (const key of ['result', 'blocked', 'summary']) next.delete(key);
+    if (next.get('preset') === 'testing_active') next.delete('preset');
+    const statuses = next.get('status')?.split(',');
+    if (statuses?.includes('testing')) {
+      const remaining = statuses.filter((status) => status !== 'testing').join(',');
+      if (remaining) next.set('status', remaining);
+      else next.delete('status');
+    }
+    if (next.toString() === urlParams.toString()) return urlParams;
+    next.delete('page');
+    return next;
+  }, [urlParams]);
+  useEffect(() => {
+    if (searchParams !== urlParams) setSearchParams(searchParams, { replace: true });
+  }, [searchParams, urlParams, setSearchParams]);
   const sourceProject = searchParams.get('source') === 'project' && !!searchParams.get('project');
 
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
@@ -163,7 +184,7 @@ export default function Tasks() {
       supabase.rpc('list_tasks', {
         p_scope: scope,
         p_query: q.trim() || null,
-        p_task_type: fType || null,
+        p_task_type: testingFeaturesEnabled ? fType || null : 'dev',
         p_project_id: fProject || null,
         p_statuses: fStatus ? fStatus.split(',').filter(Boolean) : null,
         p_priority: fPriority || null,
@@ -182,7 +203,7 @@ export default function Tasks() {
       supabase.from('developers').select('*').order('name'),
       supabase.from('teams').select('*').order('name'),
       supabase.from('developer_teams').select('developer_id, team_id'),
-      supabase.from('test_rounds').select('*'),
+      testingFeaturesEnabled ? supabase.from('test_rounds').select('*') : { data: [] },
       supabase.from('task_approval_audits').select('*').order('created_at', { ascending: false }),
     ]);
     const taskPage = (t.data as TaskPage | null) ?? { items: [], total: 0, page, page_size: PAGE_SIZE };
@@ -222,6 +243,7 @@ export default function Tasks() {
   }, [tasks, contextTasks]);
 
   const loadTaskContext = useCallback(async (task: Task) => {
+    if (!testingFeaturesEnabled) return;
     const related = task.task_type === 'dev'
       ? await supabase.from('tasks').select('*').eq('linked_task_id', task.id).order('created_at', { ascending: false })
       : task.linked_task_id
@@ -491,10 +513,9 @@ export default function Tasks() {
 
   // ---------- 选项 ----------
 
-  const statusOptions = (Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => ({
-    value: s,
-    label: STATUS_LABEL[s],
-  }));
+  const statusOptions = (Object.keys(STATUS_LABEL) as TaskStatus[])
+    .filter((s) => testingFeaturesEnabled || s !== 'testing')
+    .map((s) => ({ value: s, label: STATUS_LABEL[s] }));
   const priorityOptions = (Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => ({
     value: p,
     label: PRIORITY_LABEL[p],
@@ -519,13 +540,15 @@ export default function Tasks() {
         actions={<div className="flex items-center gap-2"><button onClick={() => { const next = new URLSearchParams(searchParams); next.set('preset', 'pending_my_approval'); next.delete('page'); setSearchParams(next); }} className={btnGhost}>待我审批</button><button onClick={openCreate} className={`${btnPrimary} flex items-center gap-1.5`}><Plus size={16} /> 添加任务</button></div>}
       />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-3 text-sm">
-        <div>
-          <div className="font-medium text-slate-900 dark:text-white">测试工作已改为项目 / 阶段 / 版本轮次</div>
-          <div className="mt-1 text-xs text-slate-500">开发任务不再单独提测；历史测试任务只读保留，新测试活动和测试建设任务请到测试中心处理。</div>
+      {testingFeaturesEnabled && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-4 py-3 text-sm">
+          <div>
+            <div className="font-medium text-slate-900 dark:text-white">测试工作已改为项目 / 阶段 / 版本轮次</div>
+            <div className="mt-1 text-xs text-slate-500">开发任务不再单独提测；历史测试任务只读保留，新测试活动和测试建设任务请到测试中心处理。</div>
+          </div>
+          <button className={btnGhost} onClick={() => navigate('/testing')}>进入测试中心</button>
         </div>
-        <button className={btnGhost} onClick={() => navigate('/testing')}>进入测试中心</button>
-      </div>
+      )}
 
       {sourceProject && (
         <div className="mb-4 rounded-xl border border-brand-500/25 bg-brand-500/5 px-4 py-3">
@@ -569,16 +592,18 @@ export default function Tasks() {
           onChange={(v) => setScope(v as ScopeKey)}
           options={(Object.keys(SCOPE_LABEL) as ScopeKey[]).map((k) => ({ value: k, label: SCOPE_LABEL[k] }))}
         />
-        <Select
-          size="sm"
-          className="w-28"
-          value={fType}
-          onChange={setFType}
-          options={[
-            { value: '', label: '全部类型' },
-            ...(Object.keys(TASK_TYPE_LABEL) as TaskType[]).map((k) => ({ value: k, label: TASK_TYPE_LABEL[k] })),
-          ]}
-        />
+        {testingFeaturesEnabled && (
+          <Select
+            size="sm"
+            className="w-28"
+            value={fType}
+            onChange={setFType}
+            options={[
+              { value: '', label: '全部类型' },
+              ...(Object.keys(TASK_TYPE_LABEL) as TaskType[]).map((k) => ({ value: k, label: TASK_TYPE_LABEL[k] })),
+            ]}
+          />
+        )}
         <Select size="sm" className="w-32" value={fProject} onChange={setFProject} options={withAll('全部项目', projectOptions)} />
         <Select size="sm" className="w-28" value={fStatus.includes(',') ? '' : fStatus} onChange={setFStatus} options={withAll('全部状态', statusOptions)} />
         <Select size="sm" className="w-28" value={fPriority} onChange={setFPriority} options={withAll('全部优先级', priorityOptions)} />
@@ -661,7 +686,7 @@ export default function Tasks() {
                 <td className="overflow-hidden px-4 py-3">
                   <div className="space-y-1.5">
                     <span className={`inline-flex max-w-full truncate whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[t.status]}`}>
-                      {STATUS_LABEL[t.status]}
+                      {taskStatusLabel(t.status)}
                     </span>
                     {t.task_type === 'test' && (
                       t.test_result ? (
@@ -726,7 +751,7 @@ export default function Tasks() {
                     {t.work_source === 'legacy_single_test' && (
                       <span className="text-xs text-slate-500">历史测试只读</span>
                     )}
-                    {t.status === 'testing' && (
+                    {testingFeaturesEnabled && t.status === 'testing' && (
                       <span className="flex items-center gap-1 text-xs text-cyan-700 dark:text-cyan-300"><Lock size={13} /> 测试中</span>
                     )}
                     {canApprove(t) && (
@@ -878,9 +903,9 @@ export default function Tasks() {
                 <div className="mt-0.5 text-xs opacity-75">
                   来源：{!confirmApprove.submitted_at
                     ? '异常数据回退：当前审批时间'
-                    : detailTasks.some((item) => item.task_type === 'test' && item.linked_task_id === confirmApprove.id && item.test_result === 'pass')
+                    : testingFeaturesEnabled && detailTasks.some((item) => item.task_type === 'test' && item.linked_task_id === confirmApprove.id && item.test_result === 'pass')
                       ? '开发任务提测时间'
-                      : '最近一次提交完成时间'}
+                      : testingFeaturesEnabled ? '最近一次提交完成时间' : '任务提交时间'}
                 </div>
               </div>
             </div>
@@ -1196,7 +1221,7 @@ function TaskDetail({
             {TASK_TYPE_LABEL[task.task_type]}
           </span>
           <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[task.status]}`}>
-            {STATUS_LABEL[task.status]}
+            {taskStatusLabel(task.status)}
           </span>
           <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${PRIORITY_BADGE[task.priority]}`}>
             {PRIORITY_LABEL[task.priority]}
@@ -1264,7 +1289,7 @@ function TaskDetail({
         </>
       )}
 
-      {task.task_type === 'dev' && (
+      {testingFeaturesEnabled && task.task_type === 'dev' && (
         <section>
           <h4 className="mb-2 text-sm font-medium text-slate-800 dark:text-slate-200">关联测试记录</h4>
           {relatedTests.length === 0 ? (
@@ -1316,7 +1341,7 @@ function TaskDetail({
 
       {(task.reject_note || task.delay_note) && (
         <section className="grid gap-3 sm:grid-cols-2">
-          {task.reject_note && <DetailNote label="驳回/测试不通过原因" value={task.reject_note} tone="danger" />}
+          {task.reject_note && <DetailNote label={testingFeaturesEnabled ? '驳回/测试不通过原因' : '驳回原因'} value={task.reject_note} tone="danger" />}
           {task.delay_note && <DetailNote label="延期备注" value={task.delay_note} tone="warn" />}
         </section>
       )}

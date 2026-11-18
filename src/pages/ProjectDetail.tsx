@@ -17,12 +17,12 @@ import {
   Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { projectCompletionMessage, taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Modal, { btnGhost, inputCls, labelCls } from '../components/Modal';
 import {
   PROJECT_STATUS_LABEL,
-  STATUS_LABEL,
   TEST_RESULT_BADGE,
   TEST_RESULT_LABEL,
   type Developer,
@@ -63,7 +63,7 @@ export default function ProjectDetail() {
       supabase.rpc('get_project_cockpit', { p_project_id: id }),
       supabase.from('teams').select('*').order('name'),
       supabase.from('developers').select('*').order('name'),
-      supabase.rpc('get_project_test_summary', { p_project_id: id }),
+      testingFeaturesEnabled ? supabase.rpc('get_project_test_summary', { p_project_id: id }) : { data: null },
     ]);
     if (cockpit.error) setError(cockpit.error.message);
     setData((cockpit.data as ProjectCockpit) ?? null);
@@ -80,8 +80,11 @@ export default function ProjectDetail() {
     const section = searchParams.get('section');
     const restore = Number(searchParams.get('restoreScroll'));
     const timer = window.setTimeout(() => {
-      if (section) document.getElementById(`project-${section}`)?.scrollIntoView({ block: 'start' });
-      else if (Number.isFinite(restore) && restore > 0) window.scrollTo({ top: restore });
+      if (section && (testingFeaturesEnabled || section !== 'quality')) {
+        document.getElementById(`project-${section}`)?.scrollIntoView({ block: 'start' });
+      } else if (Number.isFinite(restore) && restore > 0) {
+        window.scrollTo({ top: restore });
+      }
     }, 60);
     return () => window.clearTimeout(timer);
   }, [loading, searchParams]);
@@ -114,11 +117,12 @@ export default function ProjectDetail() {
     });
     setCompleting(false);
     if (completeError) {
+      const message = projectCompletionMessage(completeError.message);
       if (role === 'admin') {
-        setForceErr(completeError.message);
+        setForceErr(message);
         setForceOpen(true);
       } else {
-        setError(completeError.message);
+        setError(message);
       }
       return;
     }
@@ -147,7 +151,7 @@ export default function ProjectDetail() {
     { label: '待处理', value: data.todo_count, filters: { status: 'todo' }, tone: 'slate' },
     { label: '进行中', value: data.in_progress_count, filters: { status: 'in_progress' }, tone: 'blue' },
     { label: '已挂起', value: data.paused_count, filters: { status: 'paused' }, tone: 'violet' },
-    { label: '测试中', value: data.testing_active_count, filters: { preset: 'testing_active' }, tone: 'cyan' },
+    ...(testingFeaturesEnabled ? [{ label: '测试中', value: data.testing_active_count, filters: { preset: 'testing_active' }, tone: 'cyan' }] : []),
     { label: '待审批', value: data.review_count, filters: { status: 'review' }, tone: 'amber' },
     { label: '已完成', value: data.completed_task_count, filters: { status: 'done,delayed_done' }, tone: 'emerald' },
     { label: '延期完成', value: data.delayed_done_count, filters: { status: 'delayed_done' }, tone: 'orange' },
@@ -164,6 +168,8 @@ export default function ProjectDetail() {
       </div>
     </div>
   );
+
+  const timeline = testingFeaturesEnabled ? data.timeline : data.timeline.filter((event) => event.event_type !== 'test_concluded');
 
   return (
     <div className="space-y-6">
@@ -208,107 +214,109 @@ export default function ProjectDetail() {
           <OverviewMetric icon={<Gauge size={17} />} label="开发完成率" value={`${data.dev_task_completed}/${data.dev_task_total} · ${pct(data.dev_completion_rate)}`} hint="仅统计开发任务" onClick={() => openTasks({ type: 'dev' })} />
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className={`grid gap-3 sm:grid-cols-2 ${testingFeaturesEnabled ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
           <ActionMetric label="全部开发任务" value={data.dev_task_total} hint="统一任务入口" onClick={() => openTasks({ type: 'dev' })} />
-          <ActionMetric label="全部测试任务" value={data.test_task_total} hint={`共 ${data.test_round_total} 个测试轮次`} onClick={() => openTasks({ type: 'test' })} />
+          {testingFeaturesEnabled && <ActionMetric label="全部测试任务" value={data.test_task_total} hint={`共 ${data.test_round_total} 个测试轮次`} onClick={() => openTasks({ type: 'test' })} />}
           <ActionMetric label="待审批任务" value={data.review_count} hint="由项目负责人逐项审批" onClick={() => openTasks({ status: 'review' })} />
-          <ActionMetric label="当前风险" value={data.overdue_count + data.blocked_round_count} hint={`${data.overdue_count} 逾期 · ${data.blocked_round_count} 阻断`} onClick={() => openTasks({ timing: 'overdue' })} />
+          <ActionMetric label="当前风险" value={data.overdue_count + (testingFeaturesEnabled ? data.blocked_round_count : 0)} hint={testingFeaturesEnabled ? `${data.overdue_count} 逾期 · ${data.blocked_round_count} 阻断` : `${data.overdue_count} 逾期`} onClick={() => openTasks({ timing: 'overdue' })} />
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">任务状态分布</h3>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-9">
+          <div className={`mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 ${testingFeaturesEnabled ? 'xl:grid-cols-9' : 'xl:grid-cols-8'}`}>
             {statusMetrics.map((metric) => (
               <StatusMetric key={metric.label} {...metric} onClick={() => openTasks(metric.filters)} />
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">“测试中”采用组合口径：开发任务处于 testing，加上尚未出结论的在办测试任务。</p>
+          {testingFeaturesEnabled && <p className="mt-3 text-xs text-slate-500">“测试中”采用组合口径：开发任务处于 testing，加上尚未出结论的在办测试任务。</p>}
         </div>
       </section>
 
-      <section id="project-quality" className="scroll-mt-20 space-y-4">
-        <SectionTitle icon={<FlaskConical size={18} />} title="测试与质量" hint="Bug 明细仍以禅道为唯一来源，本页只展示每轮汇总。" />
-        {projectTest && (
-          <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/5 p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold text-slate-900 dark:text-white">项目级测试门禁</h3>
-                  <span className="rounded-full bg-white/70 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-900/70 dark:text-slate-300">
-                    {projectTest.test_state === 'passed' ? '测试已通过' : projectTest.test_state === 'no_test_approved' ? '无需测试已批准' : projectTest.test_state}
-                  </span>
+      {testingFeaturesEnabled && (
+        <section id="project-quality" className="scroll-mt-20 space-y-4">
+          <SectionTitle icon={<FlaskConical size={18} />} title="测试与质量" hint="Bug 明细仍以禅道为唯一来源，本页只展示每轮汇总。" />
+          {projectTest && (
+            <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/5 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-slate-900 dark:text-white">项目级测试门禁</h3>
+                    <span className="rounded-full bg-white/70 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-900/70 dark:text-slate-300">
+                      {projectTest.test_state === 'passed' ? '测试已通过' : projectTest.test_state === 'no_test_approved' ? '无需测试已批准' : projectTest.test_state}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                    {projectTest.plan_id
+                      ? `${projectTest.plan_title} · ${projectTest.cycle_count} 轮 · 执行 ${projectTest.executed_count} · Bug ${projectTest.bug_count} · 实际投入 ${formatEffort(projectTest.test_actual_hours)}`
+                      : projectTest.no_test_status === 'pending'
+                        ? `无需测试申请待测试组长确认：${projectTest.no_test_reason}`
+                        : '尚未发起项目级测试。开发任务不再从单个任务提测。'}
+                  </p>
+                  {projectTest.no_test_status === 'rejected' && <p className="mt-1 text-sm text-red-600">无需测试申请已退回：{projectTest.no_test_decision_note}</p>}
                 </div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                  {projectTest.plan_id
-                    ? `${projectTest.plan_title} · ${projectTest.cycle_count} 轮 · 执行 ${projectTest.executed_count} · Bug ${projectTest.bug_count} · 实际投入 ${formatEffort(projectTest.test_actual_hours)}`
-                    : projectTest.no_test_status === 'pending'
-                      ? `无需测试申请待测试组长确认：${projectTest.no_test_reason}`
-                      : '尚未发起项目级测试。开发任务不再从单个任务提测。'}
-                </p>
-                {projectTest.no_test_status === 'rejected' && <p className="mt-1 text-sm text-red-600">无需测试申请已退回：{projectTest.no_test_decision_note}</p>}
+                <div className="flex flex-wrap gap-2">
+                  {projectTest.plan_id ? (
+                    <button className={btnGhost} onClick={() => navigate(`/testing/plans/${projectTest.plan_id}`)}>查看测试计划</button>
+                  ) : (
+                    <>
+                      <button className={btnGhost} onClick={() => navigate(`/testing?view=plans&project=${id}`)}>发起项目测试</button>
+                      {data.owner_id === developer?.id && projectTest.no_test_status !== 'pending' && (
+                        <button className={btnGhost} onClick={() => setNoTestOpen(true)}>申请无需测试</button>
+                      )}
+                      {data.owner_id === developer?.id && projectTest.no_test_status === 'pending' && (
+                        <button className={btnGhost} onClick={async () => {
+                          const { error: rpcError } = await supabase.rpc('withdraw_no_test_request', { p_project_id: id });
+                          if (rpcError) setError(rpcError.message); else load();
+                        }}>撤回无需测试申请</button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {projectTest.plan_id ? (
-                  <button className={btnGhost} onClick={() => navigate(`/testing/plans/${projectTest.plan_id}`)}>查看测试计划</button>
-                ) : (
-                  <>
-                    <button className={btnGhost} onClick={() => navigate(`/testing?view=plans&project=${id}`)}>发起项目测试</button>
-                    {data.owner_id === developer?.id && projectTest.no_test_status !== 'pending' && (
-                      <button className={btnGhost} onClick={() => setNoTestOpen(true)}>申请无需测试</button>
-                    )}
-                    {data.owner_id === developer?.id && projectTest.no_test_status === 'pending' && (
-                      <button className={btnGhost} onClick={async () => {
-                        const { error: rpcError } = await supabase.rpc('withdraw_no_test_request', { p_project_id: id });
-                        if (rpcError) setError(rpcError.message); else load();
-                      }}>撤回无需测试申请</button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-          <QualityMetric label="累计新增 Bug" value={numberValue(projectTest?.plan_id ? projectTest.bug_count : data.cumulative_bug_count)} icon={<Bug size={16} />} />
-          <QualityMetric label="Reopen" value={numberValue(projectTest?.plan_id ? projectTest.reopen_count : data.reopen_count)} icon={<History size={16} />} />
-          <QualityMetric label="阻断数量" value={numberValue(projectTest?.plan_id ? projectTest.blocked_count : data.blocked_round_count)} icon={<ShieldAlert size={16} />} danger={(projectTest?.plan_id ? projectTest.blocked_count : data.blocked_round_count) > 0} />
-          <QualityMetric label="测试通过率" value={projectTest?.plan_id ? pct(projectTest.passed_cycle_count + projectTest.failed_cycle_count ? Math.round(projectTest.passed_cycle_count * 1000 / (projectTest.passed_cycle_count + projectTest.failed_cycle_count)) / 10 : null) : pct(data.test_pass_rate)} icon={<CheckCircle2 size={16} />} hint="通过轮次 / 已确认结论轮次" />
-          <QualityMetric label="结论覆盖率" value={projectTest?.plan_id ? pct(projectTest.cycle_count ? Math.round((projectTest.passed_cycle_count + projectTest.failed_cycle_count) * 1000 / projectTest.cycle_count) / 10 : null) : pct(data.summary_coverage_rate)} icon={<Gauge size={16} />} hint={projectTest?.plan_id ? `${projectTest.passed_cycle_count + projectTest.failed_cycle_count}/${projectTest.cycle_count}` : `${data.summary_covered_count}/${data.summary_expected_count}`} />
-          <QualityMetric label="待确认/在办轮次" value={projectTest?.plan_id ? String(projectTest.active_cycle_count) : String(Math.max(0, data.summary_expected_count - data.summary_covered_count))} icon={<AlertTriangle size={16} />} danger={projectTest?.plan_id ? projectTest.active_cycle_count > 0 : data.summary_expected_count > data.summary_covered_count} />
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-            <h3 className="font-semibold text-slate-900 dark:text-white">历史单任务测试汇总</h3>
-          </div>
-          {data.quality_rounds.length === 0 ? (
-            <div className="p-8 text-center text-sm text-slate-500">暂无已录入的测试汇总；历史空数据不会按 0 统计。</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-[980px] w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950/40">
-                  <tr><th className="px-4 py-3">测试任务</th><th className="px-4 py-3">轮次 / 方式</th><th className="px-4 py-3">结论</th><th className="px-4 py-3">用例</th><th className="px-4 py-3">Bug / Reopen</th><th className="px-4 py-3">阻断</th><th className="px-4 py-3">禅道</th></tr>
-                </thead>
-                <tbody>
-                  {data.quality_rounds.map((round) => {
-                    const visibleResult = round.result ?? round.test_result;
-                    return (
-                    <tr key={round.id ?? `missing-${round.test_task_id}`} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="max-w-72 px-4 py-3"><button className="block max-w-full truncate font-medium text-slate-900 hover:text-brand-600 dark:text-white" onClick={() => openTasks({ focus: round.test_task_id })}>{round.test_task_title}</button><div className="mt-1 truncate text-xs text-slate-500">{round.tester_name ?? '未分配测试负责人'}</div>{round.linked_task_title && <div className="mt-0.5 max-w-full truncate text-xs text-slate-500">关联：{round.linked_task_title}</div>}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{round.summary_recorded ? `第 ${round.round_no} 轮` : '汇总未录入'}<div className="text-xs text-slate-500">{round.test_method === 'case_based' ? '标准用例' : round.test_method === 'exploratory' ? '快速 / 探索' : '历史测试任务'}</div>{round.summary_recorded && <div className="mt-1 text-[11px] text-slate-500">{round.started_at ? new Date(round.started_at).toLocaleDateString('zh-CN') : '—'} → {round.concluded_at ? new Date(round.concluded_at).toLocaleDateString('zh-CN') : '进行中'}</div>}</td>
-                      <td className="px-4 py-3">{visibleResult ? <><span className={`rounded-full px-2 py-1 text-xs ${TEST_RESULT_BADGE[visibleResult]}`}>{TEST_RESULT_LABEL[visibleResult]}</span>{!round.summary_recorded && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">仅历史结论，无结构化汇总</div>}</> : <span className="text-slate-500">进行中</span>}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{!round.summary_recorded ? '未录入' : round.test_method === 'case_based' ? `${round.executed_case_count ?? '—'} / ${round.planned_case_count ?? '—'}` : '不记录用例数'}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{round.result ? `${round.bug_count ?? 0} / ${round.reopen_count ?? 0}` : '—'}</td>
-                      <td className="px-4 py-3">{round.blocked ? <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-300">主流程阻断</span> : <span className="text-slate-500">{round.summary_recorded ? '否' : '—'}</span>}</td>
-                      <td className="px-4 py-3">{round.zentao_url ? <a className="inline-flex items-center gap-1 text-brand-600 hover:underline dark:text-brand-400" href={round.zentao_url} target="_blank" rel="noreferrer noopener"><ExternalLink size={13} /> 打开禅道</a> : <span className="text-slate-500">未关联</span>}</td>
-                    </tr>
-                  );})}
-                </tbody>
-              </table>
             </div>
           )}
-        </div>
-      </section>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <QualityMetric label="累计新增 Bug" value={numberValue(projectTest?.plan_id ? projectTest.bug_count : data.cumulative_bug_count)} icon={<Bug size={16} />} />
+            <QualityMetric label="Reopen" value={numberValue(projectTest?.plan_id ? projectTest.reopen_count : data.reopen_count)} icon={<History size={16} />} />
+            <QualityMetric label="阻断数量" value={numberValue(projectTest?.plan_id ? projectTest.blocked_count : data.blocked_round_count)} icon={<ShieldAlert size={16} />} danger={(projectTest?.plan_id ? projectTest.blocked_count : data.blocked_round_count) > 0} />
+            <QualityMetric label="测试通过率" value={projectTest?.plan_id ? pct(projectTest.passed_cycle_count + projectTest.failed_cycle_count ? Math.round(projectTest.passed_cycle_count * 1000 / (projectTest.passed_cycle_count + projectTest.failed_cycle_count)) / 10 : null) : pct(data.test_pass_rate)} icon={<CheckCircle2 size={16} />} hint="通过轮次 / 已确认结论轮次" />
+            <QualityMetric label="结论覆盖率" value={projectTest?.plan_id ? pct(projectTest.cycle_count ? Math.round((projectTest.passed_cycle_count + projectTest.failed_cycle_count) * 1000 / projectTest.cycle_count) / 10 : null) : pct(data.summary_coverage_rate)} icon={<Gauge size={16} />} hint={projectTest?.plan_id ? `${projectTest.passed_cycle_count + projectTest.failed_cycle_count}/${projectTest.cycle_count}` : `${data.summary_covered_count}/${data.summary_expected_count}`} />
+            <QualityMetric label="待确认/在办轮次" value={projectTest?.plan_id ? String(projectTest.active_cycle_count) : String(Math.max(0, data.summary_expected_count - data.summary_covered_count))} icon={<AlertTriangle size={16} />} danger={projectTest?.plan_id ? projectTest.active_cycle_count > 0 : data.summary_expected_count > data.summary_covered_count} />
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <h3 className="font-semibold text-slate-900 dark:text-white">历史单任务测试汇总</h3>
+            </div>
+            {data.quality_rounds.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">暂无已录入的测试汇总；历史空数据不会按 0 统计。</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[980px] w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950/40">
+                    <tr><th className="px-4 py-3">测试任务</th><th className="px-4 py-3">轮次 / 方式</th><th className="px-4 py-3">结论</th><th className="px-4 py-3">用例</th><th className="px-4 py-3">Bug / Reopen</th><th className="px-4 py-3">阻断</th><th className="px-4 py-3">禅道</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.quality_rounds.map((round) => {
+                      const visibleResult = round.result ?? round.test_result;
+                      return (
+                      <tr key={round.id ?? `missing-${round.test_task_id}`} className="border-t border-slate-100 dark:border-slate-800">
+                        <td className="max-w-72 px-4 py-3"><button className="block max-w-full truncate font-medium text-slate-900 hover:text-brand-600 dark:text-white" onClick={() => openTasks({ focus: round.test_task_id })}>{round.test_task_title}</button><div className="mt-1 truncate text-xs text-slate-500">{round.tester_name ?? '未分配测试负责人'}</div>{round.linked_task_title && <div className="mt-0.5 max-w-full truncate text-xs text-slate-500">关联：{round.linked_task_title}</div>}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{round.summary_recorded ? `第 ${round.round_no} 轮` : '汇总未录入'}<div className="text-xs text-slate-500">{round.test_method === 'case_based' ? '标准用例' : round.test_method === 'exploratory' ? '快速 / 探索' : '历史测试任务'}</div>{round.summary_recorded && <div className="mt-1 text-[11px] text-slate-500">{round.started_at ? new Date(round.started_at).toLocaleDateString('zh-CN') : '—'} → {round.concluded_at ? new Date(round.concluded_at).toLocaleDateString('zh-CN') : '进行中'}</div>}</td>
+                        <td className="px-4 py-3">{visibleResult ? <><span className={`rounded-full px-2 py-1 text-xs ${TEST_RESULT_BADGE[visibleResult]}`}>{TEST_RESULT_LABEL[visibleResult]}</span>{!round.summary_recorded && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">仅历史结论，无结构化汇总</div>}</> : <span className="text-slate-500">进行中</span>}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{!round.summary_recorded ? '未录入' : round.test_method === 'case_based' ? `${round.executed_case_count ?? '—'} / ${round.planned_case_count ?? '—'}` : '不记录用例数'}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{round.result ? `${round.bug_count ?? 0} / ${round.reopen_count ?? 0}` : '—'}</td>
+                        <td className="px-4 py-3">{round.blocked ? <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-300">主流程阻断</span> : <span className="text-slate-500">{round.summary_recorded ? '否' : '—'}</span>}</td>
+                        <td className="px-4 py-3">{round.zentao_url ? <a className="inline-flex items-center gap-1 text-brand-600 hover:underline dark:text-brand-400" href={round.zentao_url} target="_blank" rel="noreferrer noopener"><ExternalLink size={13} /> 打开禅道</a> : <span className="text-slate-500">未关联</span>}</td>
+                      </tr>
+                    );})}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section id="project-people" className="scroll-mt-20 space-y-4">
         <SectionTitle icon={<Users size={18} />} title="人员与投入" hint="投入来自工时段；人员任务明细继续从统一任务入口查看。" />
@@ -316,11 +324,11 @@ export default function ProjectDetail() {
           {data.people.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">暂无项目人员投入</div> : (
             <div className="overflow-x-auto">
               <table className="min-w-[900px] w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950/40"><tr><th className="px-5 py-3">人员</th><th className="px-5 py-3">全部任务</th><th className="px-5 py-3">开发 / 测试</th><th className="px-5 py-3">已完成</th><th className="px-5 py-3">待审批 / 逾期</th><th className="px-5 py-3">实际投入</th><th className="px-5 py-3 text-right">查看</th></tr></thead>
+                <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-950/40"><tr><th className="px-5 py-3">人员</th><th className="px-5 py-3">全部任务</th>{testingFeaturesEnabled && <th className="px-5 py-3">开发 / 测试</th>}<th className="px-5 py-3">已完成</th><th className="px-5 py-3">待审批 / 逾期</th><th className="px-5 py-3">实际投入</th><th className="px-5 py-3 text-right">查看</th></tr></thead>
                 <tbody>{data.people.map((person) => (
                   <tr key={person.developer_id ?? 'unassigned'} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-5 py-3"><div className="font-medium text-slate-900 dark:text-white">{person.person_name}</div><div className="text-xs text-slate-500">{person.position ?? (person.developer_id ? '未设置职位' : '待分配')}</div></td>
-                    <td className="px-5 py-3">{person.task_count}</td><td className="px-5 py-3">{person.dev_task_count} / {person.test_task_count}</td><td className="px-5 py-3">{person.completed_task_count}</td><td className="px-5 py-3">{person.review_task_count} / {person.overdue_task_count}</td><td className="px-5 py-3">{formatEffort(person.actual_effort_hours)}</td>
+                    <td className="px-5 py-3">{person.task_count}</td>{testingFeaturesEnabled && <td className="px-5 py-3">{person.dev_task_count} / {person.test_task_count}</td>}<td className="px-5 py-3">{person.completed_task_count}</td><td className="px-5 py-3">{person.review_task_count} / {person.overdue_task_count}</td><td className="px-5 py-3">{formatEffort(person.actual_effort_hours)}</td>
                     <td className="px-5 py-3 text-right"><button className="inline-flex items-center gap-1 text-brand-600 hover:underline dark:text-brand-400" onClick={() => openTasks({ assignee: person.developer_id ?? 'unassigned' })}>任务明细 <ChevronRight size={13} /></button></td>
                   </tr>
                 ))}</tbody>
@@ -331,13 +339,13 @@ export default function ProjectDetail() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <h3 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white"><History size={16} /> 项目阶段时间线</h3>
-          {data.timeline.length === 0 ? <div className="py-6 text-sm text-slate-500">暂无阶段事件</div> : (
+          {timeline.length === 0 ? <div className="py-6 text-sm text-slate-500">暂无阶段事件</div> : (
             <ol className="mt-4 space-y-3 border-l border-slate-200 pl-5 dark:border-slate-700">
-              {data.timeline.map((event, index) => (
+              {timeline.map((event, index) => (
                 <li key={`${event.event_type}-${event.occurred_at}-${index}`} className="relative">
                   <span className="absolute -left-[25px] top-1.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-4 ring-white dark:ring-slate-900" />
                   <div className="flex flex-wrap items-center gap-x-3"><span className="text-sm font-medium text-slate-900 dark:text-white">{event.title}</span><span className="text-xs text-slate-500">{new Date(event.occurred_at).toLocaleString('zh-CN', { hour12: false })}</span></div>
-                  {event.detail && <div className="mt-0.5 text-xs text-slate-500">{event.detail}</div>}
+                  {event.detail && <div className="mt-0.5 text-xs text-slate-500">{!testingFeaturesEnabled && event.event_type === 'task_submitted' && event.detail === 'testing' ? taskStatusLabel('testing') : event.detail}</div>}
                 </li>
               ))}
             </ol>
@@ -352,16 +360,18 @@ export default function ProjectDetail() {
           <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setForceOpen(false)}>取消</button><button disabled={!forceReason.trim() || completing} onClick={() => complete(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"><ShieldAlert size={15} /> {completing ? '提交中…' : '确认强制完成'}</button></div>
         </div>
       </Modal>
-      <Modal title="申请无需测试" open={noTestOpen} onClose={() => !noTestSaving && setNoTestOpen(false)}>
-        <div className="space-y-4">
-          <div className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-            申请提交后仍视为“需要测试”，只有测试组长批准后才解除项目测试门禁。所有决定均保留审计。
+      {testingFeaturesEnabled && (
+        <Modal title="申请无需测试" open={noTestOpen} onClose={() => !noTestSaving && setNoTestOpen(false)}>
+          <div className="space-y-4">
+            <div className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+              申请提交后仍视为“需要测试”，只有测试组长批准后才解除项目测试门禁。所有决定均保留审计。
+            </div>
+            <div><label className={labelCls}>无需测试原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-32 resize-none`} minLength={10} maxLength={1000} value={noTestReason} onChange={(e) => setNoTestReason(e.target.value)} placeholder="10～1000 字，说明为何本项目无需测试。" /></div>
+            <div><label className={labelCls}>关联链接（选填）</label><input className={inputCls} value={noTestUrl} onChange={(e) => setNoTestUrl(e.target.value)} placeholder="https://..." /></div>
+            <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setNoTestOpen(false)}>取消</button><button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={noTestSaving || noTestReason.trim().length < 10} onClick={submitNoTest}>{noTestSaving ? '提交中…' : '提交测试组长确认'}</button></div>
           </div>
-          <div><label className={labelCls}>无需测试原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-32 resize-none`} minLength={10} maxLength={1000} value={noTestReason} onChange={(e) => setNoTestReason(e.target.value)} placeholder="10～1000 字，说明为何本项目无需测试。" /></div>
-          <div><label className={labelCls}>关联链接（选填）</label><input className={inputCls} value={noTestUrl} onChange={(e) => setNoTestUrl(e.target.value)} placeholder="https://..." /></div>
-          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setNoTestOpen(false)}>取消</button><button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={noTestSaving || noTestReason.trim().length < 10} onClick={submitNoTest}>{noTestSaving ? '提交中…' : '提交测试组长确认'}</button></div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
     </div>
   );
 }

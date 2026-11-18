@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { login } from '../support/auth';
 import { requireAccount } from '../support/skip';
+import { uatEnv } from '../support/env';
 
 test('日期控件、弹窗、中文类型与工时口径关键 UI @full', async ({ page }) => {
   await login(page, requireAccount('admin'));
@@ -23,6 +24,7 @@ test('日期控件、弹窗、中文类型与工时口径关键 UI @full', async
   expect(dateStyle.height).toBeGreaterThanOrEqual(32);
   await page.getByRole('button', { name: '取消' }).click();
 
+  if (!uatEnv.testingFeaturesEnabled) return;
   await page.goto('/#/testing');
   await expect(page.getByRole('heading', { name: '测试中心' })).toBeVisible();
   await page.getByRole('button', { name: '资源汇总' }).click();
