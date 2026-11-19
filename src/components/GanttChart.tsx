@@ -22,7 +22,7 @@ import {
   TIMING_BADGE,
   taskGradient,
 } from '../lib/types';
-import { calcWorkload, taskTimingState, isUnfinished, planDays, actualDays } from '../lib/workload';
+import { calcWorkload, taskTimingState, isUnfinished, planDays, actualDays, taskCalendarDate, taskPlanDays } from '../lib/workload';
 
 const DAY_W = 34; // 每天列宽 px
 const BAR_H = 30; // 任务条行高 px
@@ -48,7 +48,7 @@ const ACTUAL_H = 5; // 实际投入条高度
 
 export default function GanttChart({ tasks, developers, projects, segments = [] }: Props) {
   const navigate = useNavigate();
-  const today = dstr(new Date());
+  const today = taskCalendarDate();
   const [rangeStart, setRangeStart] = useState(dstr(addDays(new Date(), -14)));
   const [rangeEnd, setRangeEnd] = useState(dstr(addDays(new Date(), 16)));
   const [showCompleted, setShowCompleted] = useState(false);
@@ -120,6 +120,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
   const segsByTask = useMemo(() => {
     const map = new Map<string, WorkSegment[]>();
     for (const s of segments) {
+      if (s.voided_at) continue;
       const list = map.get(s.task_id) ?? [];
       list.push(s);
       map.set(s.task_id, list);
@@ -334,8 +335,8 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
                           {t.title}
                         </div>
                         {segs.map((seg) => {
-                          const sd = seg.started_at.slice(0, 10);
-                          const ed = seg.ended_at ? seg.ended_at.slice(0, 10) : today;
+                          const sd = taskCalendarDate(seg.started_at);
+                          const ed = seg.ended_at ? taskCalendarDate(seg.ended_at) : today;
                           if (ed < rangeFirst || sd > rangeLast) return null;
                           const ss = dayIndex(sd);
                           const se = dayIndex(ed);
@@ -410,9 +411,9 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
             )}
             <div>
               计划：{hover.task.start_date} ~ {hover.task.due_date}
-              {planDays(hover.task.start_date, hover.task.due_date) != null && (
+              {taskPlanDays(hover.task) != null && (
                 <span className="ml-1 text-slate-400 dark:text-slate-500">
-                  （{planDays(hover.task.start_date, hover.task.due_date)} 天）
+                  （{taskPlanDays(hover.task)} 天）
                 </span>
               )}
             </div>
@@ -421,7 +422,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
                 <span className="shrink-0">实际：</span>
                 <span>
                   {(segsByTask.get(hover.task.id) ?? [])
-                    .map((s) => `${s.started_at.slice(5, 10)} ~ ${s.ended_at ? s.ended_at.slice(5, 10) : '至今'}`)
+                    .map((s) => `${taskCalendarDate(s.started_at).slice(5)} ~ ${s.ended_at ? taskCalendarDate(s.ended_at).slice(5) : '至今'}`)
                     .join('、')}
                   <span className="ml-1 text-emerald-600 dark:text-emerald-400">
                     （已投入 {actualDays(segsByTask.get(hover.task.id) ?? [])} 天）
@@ -444,7 +445,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
               {taskTimingState(hover.task) && (
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TIMING_BADGE}`}>
                   {taskTimingState(hover.task) === 'overdue'
-                    ? `已逾期 ${Math.ceil((Date.now() - new Date(hover.task.due_date!).getTime()) / 86400000)} 天`
+                    ? `已逾期 ${(planDays(hover.task.due_date, taskCalendarDate()) ?? 1) - 1} 天`
                     : '逾期完成'}
                 </span>
               )}

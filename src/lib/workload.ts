@@ -1,11 +1,19 @@
 // 工作量综合评分（需求 v2 §6.3）与工期计算
 import { PRIORITY_WEIGHT, type Task, type WorkSegment } from './types';
 
+const DAY_MS = 86_400_000;
+const taskDateFormat = new Intl.DateTimeFormat('sv-SE', { dateStyle: 'short', timeZone: 'Asia/Shanghai' });
+
+export const taskCalendarDate = (time: string | Date = new Date()): string => taskDateFormat.format(new Date(time));
+
 /** 计划工期（天，含首尾）；日期缺失返回 null */
 export function planDays(start: string | null, due: string | null): number | null {
   if (!start || !due || due < start) return null;
-  return Math.round((new Date(due).getTime() - new Date(start).getTime()) / 86400000) + 1;
+  return (Date.parse(due) - Date.parse(start)) / DAY_MS + 1;
 }
+
+export const taskPlanDays = (task: Pick<Task, 'start_date' | 'due_date' | 'planned_work_days'>) =>
+  task.planned_work_days ?? planDays(task.start_date, task.due_date);
 
 /** 项目实际/已运行周期（含首尾）；已完成项目缺失可靠完成时间时不猜测。 */
 export function projectActualCycleDays(
@@ -25,20 +33,33 @@ export function formatEffort(hours: number): string {
   return `${safe.toFixed(1)} 小时 / ${(safe / 8).toFixed(1)} 人天`;
 }
 
-/** 实际投入天数：工时段覆盖的自然日去重计数（开段算到今天） */
-export function actualDays(segs: WorkSegment[]): number {
-  const today = new Date().toISOString().slice(0, 10);
-  const days = new Set<string>();
-  for (const seg of segs) {
-    const from = seg.started_at.slice(0, 10);
-    const to = seg.ended_at ? seg.ended_at.slice(0, 10) : today;
-    const d = new Date(from);
-    for (let i = 0; i < 366 && d.toISOString().slice(0, 10) <= to; i++) {
-      days.add(d.toISOString().slice(0, 10));
-      d.setDate(d.getDate() + 1);
-    }
+type WorkDaySegment = Pick<WorkSegment, 'started_at' | 'ended_at' | 'voided_at'>;
+
+function workDays(segments: WorkDaySegment[], openEnd: string | null) {
+  const days = new Set<number>();
+  for (const segment of segments) {
+    if (segment.voided_at) continue;
+    const endDate = segment.ended_at ? taskCalendarDate(segment.ended_at) : openEnd;
+    if (!endDate) continue;
+    const start = Date.parse(taskCalendarDate(segment.started_at));
+    const end = Date.parse(endDate);
+    for (let day = start; day <= end; day += DAY_MS) days.add(day);
   }
-  return days.size;
+  return days;
+}
+
+/** 实际投入天数：工时段覆盖的自然日去重计数（可包含尚未结束的工时段）。 */
+export function actualDays(segments: WorkDaySegment[], includeOpen = true): number {
+  return workDays(segments, includeOpen ? taskCalendarDate() : null).size;
+}
+
+export function resumeTaskDueDate(dueDate: string, plannedDays: number, segments: WorkDaySegment[], resumeDate: string): string {
+  const days = workDays(segments, null);
+  const resumeTime = Date.parse(resumeDate);
+  const remainingDays = plannedDays - days.size;
+  const daysAfterResume = Math.max(0, remainingDays - (days.has(resumeTime) ? 0 : 1));
+  const newDueDate = new Date(resumeTime + daysAfterResume * DAY_MS).toISOString().slice(0, 10);
+  return newDueDate > dueDate ? newDueDate : dueDate;
 }
 
 export const isUnfinished = (t: Pick<Task, 'status'>) => t.status !== 'done' && t.status !== 'delayed_done';
@@ -47,14 +68,14 @@ export type TaskTimingState = 'overdue' | 'delayed' | null;
 type TaskTimingFields = Pick<Task, 'status' | 'due_date' | 'completed_at'>;
 
 /**
- * 待审核任务已提交，等待审批期间不计入逾期。
+ * 已挂起和待审核任务不计入逾期。
  * overdue = 执行阶段超过截止日期；delayed = 完成时间超过截止日期。
  */
 export const taskTimingState = (t: TaskTimingFields): TaskTimingState => {
-  if (t.status === 'review' || !t.due_date) return null;
-  const completedDate = t.completed_at?.slice(0, 10);
+  if (t.status === 'paused' || t.status === 'review' || !t.due_date) return null;
+  const completedDate = t.completed_at ? taskCalendarDate(t.completed_at) : null;
   if (t.status === 'delayed_done' || (completedDate && completedDate > t.due_date)) return 'delayed';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = taskCalendarDate();
   if (t.due_date < today && isUnfinished(t)) return 'overdue';
   return null;
 };

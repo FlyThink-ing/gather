@@ -2,9 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import ts from 'typescript';
+import { actualDays, resumeTaskDueDate, taskCalendarDate, taskTimingState } from '../../../src/lib/workload';
 
 const root = path.resolve(process.env.UAT_CONTRACT_ROOT || process.cwd());
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
+
+test('挂起排除逾期，恢复后只按剩余计划投入天数顺延', () => {
+  const overdueTask = { due_date: '2000-11-18', completed_at: null };
+  expect(taskTimingState({ ...overdueTask, status: 'paused' })).toBeNull();
+  expect(taskTimingState({ ...overdueTask, status: 'in_progress' })).toBe('overdue');
+
+  const work = { started_at: '2026-11-18T00:30:00+08:00', ended_at: '2026-11-18T01:00:00+08:00', voided_at: null };
+  const sameDayWork = { ...work, started_at: '2026-11-18T09:00:00+08:00', ended_at: '2026-11-18T10:00:00+08:00' };
+  const resumeDate = taskCalendarDate('2026-11-18T16:00:00Z');
+  expect(resumeDate).toBe('2026-11-19');
+  expect(actualDays([work, sameDayWork], false)).toBe(1);
+  expect(resumeTaskDueDate('2026-11-18', 1, [work], resumeDate)).toBe('2026-11-19');
+  expect(resumeTaskDueDate('2026-11-20', 3, [work, sameDayWork], resumeDate)).toBe('2026-11-20');
+  expect(resumeTaskDueDate('2026-11-19', 3, [work], '2026-11-18')).toBe('2026-11-20');
+  expect(resumeTaskDueDate('2026-11-26', 1, [work], resumeDate)).toBe('2026-11-26');
+});
 
 test('0012 权限、统计、工时与 UI 跨层合同完整 @hardening-static @hardening', async () => {
   const migration = read('supabase/migrations/0012_permission_and_flow_hardening.sql');

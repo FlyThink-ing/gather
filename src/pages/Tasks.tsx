@@ -30,13 +30,12 @@ import {
   TEST_RESULT_BADGE,
   TIMING_BADGE,
 } from '../lib/types';
-import { planDays, isTaskOverdue, taskTimingState } from '../lib/workload';
+import { planDays, isTaskOverdue, taskCalendarDate, taskPlanDays, taskTimingState } from '../lib/workload';
 import { defaultScope, developerTeamIds, SCOPE_LABEL, taskTeamIds, type DevTeamLink, type ScopeKey } from '../lib/scope';
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
 const formatDateTime = (value: string | null) =>
-  value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '将在确认时使用当前审批时间';
-const effectiveCompletionDate = (task: Task) => task.submitted_at?.slice(0, 10) ?? todayStr();
+  value ? new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '将在确认时使用当前审批时间';
+const effectiveCompletionDate = (task: Task) => taskCalendarDate(task.submitted_at ?? undefined);
 const PAGE_SIZE = 10;
 const TASK_TITLE_MAX = 120;
 const TASK_DESCRIPTION_MAX = 5000;
@@ -394,7 +393,8 @@ export default function Tasks() {
   };
   const openManage = (t: Task) => {
     setManaging(t);
-    setManageForm({ developer_id: t.developer_id ?? '', start_date: t.start_date ?? todayStr(), due_date: t.due_date ?? todayStr(), priority: t.priority, reason: '' });
+    const today = taskCalendarDate();
+    setManageForm({ developer_id: t.developer_id ?? '', start_date: t.start_date ?? today, due_date: t.due_date ?? today, priority: t.priority, reason: '' });
     setManageErr('');
   };
   const saveManage = async () => {
@@ -721,7 +721,7 @@ export default function Tasks() {
                 </td>
                 <td className="overflow-hidden px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                   <div className="truncate whitespace-nowrap">
-                    计划 {planDays(t.start_date, t.due_date) != null ? `${planDays(t.start_date, t.due_date)} 天` : '-'}
+                    计划 {taskPlanDays(t) != null ? `${taskPlanDays(t)} 天` : '-'}
                   </div>
                   <div className="mt-0.5 truncate whitespace-nowrap text-emerald-600 dark:text-emerald-400">
                     实际 {(actualByTask.get(t.id) ?? 0) > 0 ? `${actualByTask.get(t.id)} 天` : '-'}
@@ -1094,8 +1094,8 @@ export default function Tasks() {
           </p>
           <ul className="space-y-1.5 rounded-lg bg-violet-500/10 px-3 py-2.5 text-xs text-violet-700 dark:text-violet-300">
             <li>· 挂起用于任务被打断的场景（如紧急任务插入），当前工时段将立即结束；</li>
-            <li>· 挂起期间不计入实际工时，甘特图的"实际投入"条会在此中断；</li>
-            <li>· 可随时点「继续」恢复为进行中，恢复后开始新的工时段。</li>
+            <li>· 挂起期间不计实际工时，也不计逾期；</li>
+            <li>· 点击「继续」会开启新的工时段，并按剩余计划天数自动顺延截止日期。</li>
           </ul>
           <div className="flex justify-end gap-3">
             <button className={btnGhost} onClick={() => setConfirmPause(null)}>取消</button>
@@ -1206,6 +1206,7 @@ function TaskDetail({
   const project = projects.find((item) => item.id === task.project_id);
   const owner = developers.find((item) => item.id === task.developer_id);
   const currentRound = testRounds.find((item) => item.test_task_id === task.id);
+  const plannedDays = taskPlanDays(task);
 
   const resultBadge = (result: Task['test_result']) => {
     if (!result) return <span className="text-slate-500">尚未提交结论</span>;
@@ -1261,10 +1262,10 @@ function TaskDetail({
         />
         <DetailItem label="开始日期" value={task.start_date ?? '-'} />
         <DetailItem label="截止日期" value={task.due_date ?? '-'} />
-        <DetailItem label="完成日期" value={task.completed_at?.slice(0, 10) ?? '-'} />
+        <DetailItem label="完成日期" value={task.completed_at ? taskCalendarDate(task.completed_at) : '-'} />
         <DetailItem
           label="工期"
-          value={`${planDays(task.start_date, task.due_date) != null ? `计划 ${planDays(task.start_date, task.due_date)} 天` : '计划 -'}${actualDayCount > 0 ? ` · 实际 ${actualDayCount} 天` : ''}`}
+          value={`${plannedDays != null ? `计划 ${plannedDays} 天` : '计划 -'}${actualDayCount > 0 ? ` · 实际 ${actualDayCount} 天` : ''}`}
         />
       </div>
 

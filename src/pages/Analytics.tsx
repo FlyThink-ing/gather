@@ -8,7 +8,7 @@ import { taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures'
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Select from '../components/Select';
-import { planDays, actualDays, isTaskOverdue } from '../lib/workload';
+import { taskPlanDays, actualDays, isTaskOverdue } from '../lib/workload';
 import { scopeTasks, defaultScope, taskTeamIds } from '../lib/scope';
 import {
   type Task, type Developer, type Project, type Team, type TaskStatus, type Priority, type WorkSegment, type TestRound,
@@ -182,7 +182,7 @@ export default function Analytics() {
 
   // 工期偏差：已完成任务的平均计划 vs 平均实际投入
   const durations = completedTasks
-    .map((t) => ({ plan: planDays(t.start_date, t.due_date), actual: actualDays(segsByTask.get(t.id) ?? []) }))
+    .map((t) => ({ plan: taskPlanDays(t), actual: actualDays(segsByTask.get(t.id) ?? []) }))
     .filter((x) => x.plan != null && x.actual > 0);
   const avgPlan = durations.length ? durations.reduce((s, x) => s + x.plan!, 0) / durations.length : null;
   const avgActual = durations.length ? durations.reduce((s, x) => s + x.actual, 0) / durations.length : null;

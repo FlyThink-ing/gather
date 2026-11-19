@@ -10,7 +10,8 @@
  * 映射清单见 supabase/migrations/README.md。
  */
 
-import { isTaskOverdue } from './workload';
+import type { WorkSegment } from './types';
+import { actualDays, isTaskOverdue, planDays, resumeTaskDueDate, taskCalendarDate } from './workload';
 
 type Row = Record<string, any>;
 type Store = Record<string, Row[]>;
@@ -35,6 +36,7 @@ const TABLE_DEFAULTS: Record<string, Row> = {
     team_id: null,
     start_date: null,
     due_date: null,
+    planned_work_days: null,
     submitted_at: null,
     completed_at: null,
     approved_by_role: null,
@@ -517,6 +519,9 @@ export function createDemoClient() {
   const canApproveTask = (task: Row) => task.status === 'review' && task.task_type === 'dev' && !!task.project_id
     && taskGroupLeaders(task.developer_id).includes(DEMO_DEV_ID);
 
+  const taskSegments = (taskId: string) => (store.task_work_segments ?? [])
+    .filter((segment) => segment.task_id === taskId) as WorkSegment[];
+
   // 模拟数据库触发器（0003）：enforce_task_rules / track_work_segments / notify_task_update
   // ⚠ 同步纪律：0003_triggers_seed.sql 的任何行为性修改必须同步到这里（见 supabase/migrations/README.md）
   const applyTaskRules = (old: Row, patch: Row): { patch?: Row; error?: string } => {
@@ -558,7 +563,7 @@ export function createDemoClient() {
       if (next === 'done' || next === 'delayed_done') {
         // v2.3：完成时间 = 提交审核时间，延期判定也按提交时间
         const completedAt = old.submitted_at ?? now();
-        const overdue = old.due_date && completedAt.slice(0, 10) > old.due_date;
+        const overdue = old.due_date && taskCalendarDate(completedAt) > old.due_date;
         p.status = overdue ? 'delayed_done' : 'done';
         p.completed_at = completedAt;
         p.approved_by_role = currentRole();
@@ -597,7 +602,7 @@ export function createDemoClient() {
     if (old.task_type === 'dev' && old.status === 'in_progress' && ['review', 'done', 'delayed_done'].includes(next)) {
       const completedAt = now();
       const delayNote = p.delay_note ?? old.delay_note;
-      const overdue = !!old.due_date && completedAt.slice(0, 10) > old.due_date;
+      const overdue = !!old.due_date && taskCalendarDate(completedAt) > old.due_date;
       if (overdue && (!delayNote || !String(delayNote).trim())) return { error: '任务已超期，完成前需填写延期原因' };
       p.submitted_at = completedAt;
       if (old.project_id) {
@@ -623,7 +628,7 @@ export function createDemoClient() {
         p.approved_by_user = null;
       } else {
         const completedAt = old.submitted_at ?? now();
-        const overdue = !!old.due_date && completedAt.slice(0, 10) > old.due_date;
+        const overdue = !!old.due_date && taskCalendarDate(completedAt) > old.due_date;
         p.status = overdue ? 'delayed_done' : 'done';
         p.completed_at = completedAt;
         p.approved_by_role = null;
@@ -641,7 +646,7 @@ export function createDemoClient() {
       if (old.task_type === 'test') return { error: '测试任务不能再次提测' };
       if (old.status !== 'in_progress') return { error: '只有进行中的任务可以提测' };
       const delayNote = p.delay_note ?? old.delay_note;
-      if (old.due_date && now().slice(0, 10) > old.due_date && (!delayNote || !String(delayNote).trim())) {
+      if (old.due_date && taskCalendarDate() > old.due_date && (!delayNote || !String(delayNote).trim())) {
         return { error: '任务已超期，提测前需填写延期备注' };
       }
       p.submitted_at = now();
@@ -662,25 +667,33 @@ export function createDemoClient() {
       return { error: '挂起的任务需先恢复为进行中' };
     }
 
+    const transitionAt = now();
+    if (old.task_type === 'dev' && old.work_source === 'development' && old.status === 'paused' && next === 'in_progress') {
+      const plannedDays = old.planned_work_days ?? planDays(old.start_date, old.due_date);
+      if (plannedDays != null) {
+        p.planned_work_days = plannedDays;
+        p.due_date = resumeTaskDueDate(old.due_date, plannedDays, taskSegments(old.id), taskCalendarDate(transitionAt));
+      }
+    }
+
     // 5) 实际工时段维护（v2.4，镜像 track_work_segments）
     const finalNext = p.status ?? old.status;
     if (old.work_source === 'development' && old.status !== 'in_progress' && finalNext === 'in_progress') {
-      const startedAt = now();
       (store.task_work_segments ??= []).push({
         id: uuid(),
         task_id: old.id,
         developer_id: p.developer_id ?? old.developer_id ?? null,
-        started_at: startedAt,
+        started_at: transitionAt,
         ended_at: null,
       });
       const project = store.projects.find((item) => item.id === (p.project_id ?? old.project_id));
-      if (project && (!project.actual_started_at || startedAt < project.actual_started_at)) {
-        project.actual_started_at = startedAt;
+      if (project && (!project.actual_started_at || transitionAt < project.actual_started_at)) {
+        project.actual_started_at = transitionAt;
       }
     }
     if (old.work_source === 'development' && old.status === 'in_progress' && finalNext !== 'in_progress') {
       for (const seg of store.task_work_segments ?? []) {
-        if (seg.task_id === old.id && !seg.ended_at) seg.ended_at = now();
+        if (seg.task_id === old.id && !seg.ended_at) seg.ended_at = transitionAt;
       }
     }
 
@@ -743,6 +756,7 @@ export function createDemoClient() {
           return { data: null, error: { message: '新项目由各小组共同使用' } };
         }
         if (this.table === 'tasks') {
+          row.planned_work_days = null;
           if (row.created_by !== DEMO_DEV_ID) return { data: null, error: { message: '任务创建人须为当前账号' } };
           const protectedLinks = [
             row.linked_task_id, row.test_result, row.test_note, row.test_plan_id,
@@ -890,18 +904,6 @@ export function createDemoClient() {
   const taskHours = (taskId: string) => (store.task_work_segments ?? [])
     .filter((segment) => segment.task_id === taskId && segment.ended_at && !segment.voided_at)
     .reduce((sum, segment) => sum + segmentHours(segment), 0);
-  const taskDayCount = (taskId: string) => {
-    const days = new Set<string>();
-    for (const segment of (store.task_work_segments ?? []).filter((item) => item.task_id === taskId && item.ended_at && !item.voided_at)) {
-      const end = segment.ended_at.slice(0, 10);
-      const cursor = new Date(segment.started_at.slice(0, 10));
-      for (let i = 0; i < 3660 && cursor.toISOString().slice(0, 10) <= end; i += 1) {
-        days.add(cursor.toISOString().slice(0, 10));
-        cursor.setDate(cursor.getDate() + 1);
-      }
-    }
-    return days.size;
-  };
   const oneDecimal = (value: number) => Math.round(value * 10) / 10;
 
   const projectSummary = (project: Row) => {
@@ -1933,6 +1935,7 @@ export function createDemoClient() {
       if (['review', 'testing', 'done', 'delayed_done'].includes(task.status)) return err('锁定或终态任务不能改派/调计划');
       if (params.p_due_date < params.p_start_date) return err('截止日期不能早于开始日期');
       const before = { ...task };
+      if (task.start_date !== params.p_start_date || task.due_date !== params.p_due_date) task.planned_work_days = null;
       Object.assign(task, {
         developer_id: params.p_developer_id ?? null, team_id: params.p_team_id ?? task.team_id,
         start_date: params.p_start_date, due_date: params.p_due_date, priority: params.p_priority, updated_at: now(),
@@ -1949,7 +1952,7 @@ export function createDemoClient() {
       const actionMap: Row = { start: ['todo', 'in_progress'], pause: ['in_progress', 'paused'], resume: ['paused', 'in_progress'], submit: ['in_progress', 'review'] };
       const [from, to] = actionMap[params.p_action] ?? [];
       if (!from || task.status !== from) return err('当前任务状态不能执行该操作');
-      if (params.p_action === 'submit' && task.due_date < day(0) && !String(params.p_delay_note ?? '').trim()) return err('逾期提交必须填写延期原因');
+      if (params.p_action === 'submit' && isOverdue(task) && !String(params.p_delay_note ?? '').trim()) return err('逾期提交必须填写延期原因');
       const before = { ...task };
       const result = applyTaskRules(task, params.p_action === 'submit'
         ? { status: to, delay_note: String(params.p_delay_note ?? '').trim() || task.delay_note }
@@ -2059,7 +2062,7 @@ export function createDemoClient() {
       const items = rows.slice((page - 1) * pageSize, page * pageSize).map((task) => ({
         ...task,
         actual_effort_hours: oneDecimal(taskHours(task.id)),
-        actual_day_count: taskDayCount(task.id),
+        actual_day_count: actualDays(taskSegments(task.id), false),
       }));
       return { data: { items, total, page, page_size: pageSize }, error: null };
     }

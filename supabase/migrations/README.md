@@ -46,6 +46,7 @@
 | 0017 待审核任务的逾期判定 | 待审核任务从逾期筛选、工作台和项目统计中排除 | `isOverdue`、`list_tasks`、`get_dashboard_task_counts`、`projectSummary()`、`projectCockpit()` |
 | 0018 创建项目与组长审批 | 管理员创建项目；任务负责人所属小组的组长审批；新建任务可选全部项目 | 项目 insert 分支、`canApproveTask`、提交通知、待审批列表与计数、`get_task_creation_projects` |
 | 0019 跨组共享项目 | 项目与小组解绑；组长查看本组成员创建或负责的任务；管理员更换项目负责人 | `change_project_owner`、项目候选、提测候选和任务小组筛选 |
+| 0020 任务挂起与恢复 | 挂起不计逾期；恢复时按剩余计划天数顺延截止日期 | `isOverdue`、`applyTaskRules`、任务管理 RPC |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

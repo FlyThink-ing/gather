@@ -206,6 +206,8 @@ export interface Task {
   team_id: string | null;
   start_date: string | null;
   due_date: string | null;
+  /** 自动顺延前的计划投入天数。 */
+  planned_work_days?: number | null;
   /** 最近一次提交审核的时间（工作实际完成时刻） */
   submitted_at: string | null;
   /** 完成时间 = 审批通过时生效的 submitted_at */
