@@ -22,8 +22,6 @@ type PageData<T> = { items: T[]; total: number; page: number; page_size: number 
 type EligibleInternalProject = {
   id: string;
   name: string;
-  team_id: string;
-  team_name: string;
   test_state: string;
   eligible_task_count: number;
 };
@@ -424,7 +422,7 @@ export default function TestingCenter() {
                       onChange={(value) => setPlanForm({ ...planForm, project_id: value })}
                       options={eligibleProjects.map((project) => ({
                         value: project.id,
-                        label: `${project.name} · ${project.team_name} · ${projectTestStateLabel[project.test_state] ?? project.test_state} · ${project.eligible_task_count} 个可纳入任务`,
+                        label: `${project.name} · ${projectTestStateLabel[project.test_state] ?? project.test_state} · ${project.eligible_task_count} 个可纳入任务`,
                       }))}
                       placeholder="仅显示当前可发起测试的项目"
                     />

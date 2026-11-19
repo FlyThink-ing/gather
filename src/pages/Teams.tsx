@@ -247,7 +247,7 @@ export default function Teams() {
             />
             {testingFeaturesEnabled && (
               <p className="mt-1 text-xs text-slate-500">
-                测试小组组长负责确认测试排期、无需测试申请和最终测试结论；不因此获得项目任务审批权。
+                测试小组组长还负责确认测试排期、无需测试申请和最终测试结论。
               </p>
             )}
           </div>
@@ -317,7 +317,7 @@ export default function Teams() {
         title={confirming?.action === 'remove_team' ? '删除小组' : '移出小组'}
         open={confirming !== null}
         message={confirming?.action === 'remove_team'
-          ? `确认删除小组「${confirming.team.name}」？\n该小组下的项目和任务将失去小组归属（需重新分配）。`
+          ? `确认删除小组「${confirming.team.name}」？\n该小组的成员关系将被解除。`
           : confirming ? `将「${confirming.name}」移出小组？` : ''}
         onClose={() => { if (!actionSaving) setConfirming(null); }}
         onConfirm={runConfirmedAction}

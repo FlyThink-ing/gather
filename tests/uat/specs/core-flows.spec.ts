@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { login } from '../support/auth';
 import { requireAccount } from '../support/skip';
+import { uatEnv } from '../support/env';
 
 test.describe('人员、小组、项目与任务基础流程', () => {
   test('admin 可进入基础数据创建入口，弹窗必填校验稳定 @smoke', async ({ page }) => {
@@ -39,7 +40,8 @@ test.describe('人员、小组、项目与任务基础流程', () => {
     await expect(page.getByText('请填写任务标题')).toBeVisible();
     await page.getByRole('button', { name: '取消' }).click();
 
-    await expect(page.getByText('开发任务不再单独提测')).toBeVisible();
+    await expect(page.getByRole('button', { name: '待我审批', exact: true })).toBeVisible();
+    await expect(page.getByText('开发任务不再单独提测')).toHaveCount(uatEnv.testingFeaturesEnabled ? 1 : 0);
     await expect(page.getByRole('button', { name: '我的任务' })).toBeVisible();
   });
 });

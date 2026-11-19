@@ -156,11 +156,10 @@ function seed(): Store {
   ].map(([developer_id, team_id]) => ({ id: uuid(), developer_id, team_id, created_at: now() }));
 
   const projects: Row[] = [
-    // owner_id 是唯一审批来源；p2 由演示账号负责，便于验证正常审批路径。
-    { id: 'p1', name: 'HMES-APP', description: '生产制造移动端', status: 'active', start_date: day(-30), end_date: day(40), team_id: 't1', owner_id: 'd1' },
-    { id: 'p2', name: 'EHC5.0业务开发', description: 'EHC 5.0 核心业务（跨组）', status: 'active', start_date: day(-20), end_date: day(50), team_id: 't2', owner_id: DEMO_DEV_ID },
-    { id: 'p3', name: 'EHC-APP', description: 'EHC 移动应用', status: 'active', start_date: day(-15), end_date: day(30), team_id: 't1', owner_id: 'd8' },
-    { id: 'p4', name: '立库系统对接', description: '立体仓库接口对接', status: 'active', start_date: day(-25), end_date: day(20), team_id: 't2', owner_id: 'd2' },
+    { id: 'p1', name: 'HMES-APP', description: '生产制造移动端', status: 'active', start_date: day(-30), end_date: day(40), owner_id: 'd1' },
+    { id: 'p2', name: 'EHC5.0业务开发', description: 'EHC 5.0 核心业务（跨组）', status: 'active', start_date: day(-20), end_date: day(50), owner_id: DEMO_DEV_ID },
+    { id: 'p3', name: 'EHC-APP', description: 'EHC 移动应用', status: 'active', start_date: day(-15), end_date: day(30), owner_id: 'd8' },
+    { id: 'p4', name: '立库系统对接', description: '立体仓库接口对接', status: 'active', start_date: day(-25), end_date: day(20), owner_id: 'd2' },
   ].map((p) => ({
     ...p, requires_testing: true, test_state: p.id === 'p2' ? 'testing' : 'not_requested',
     no_test_status: 'none', no_test_reason: null, no_test_related_url: null, no_test_decision_note: null,
@@ -500,6 +499,24 @@ export function createDemoClient() {
 
   let adminProxyReason: string | null = null;
 
+  const currentRole = () => store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
+
+  const memberTeamIds = (developerId: string | null) => {
+    if (!developerId) return new Set<string>();
+    const ids = new Set<string>(store.developer_teams.filter((member) => member.developer_id === developerId).map((member) => member.team_id));
+    for (const team of store.teams) if (team.leader_id === developerId) ids.add(team.id);
+    return ids;
+  };
+
+  const taskGroupLeaders = (assigneeId: string | null) => {
+    const teamIds = memberTeamIds(assigneeId);
+    const leaderIds = new Set(store.teams.filter((team) => teamIds.has(team.id)).map((team) => team.leader_id));
+    return store.developers.filter((person) => leaderIds.has(person.id) && person.is_active && person.user_id).map((person) => person.id);
+  };
+
+  const canApproveTask = (task: Row) => task.status === 'review' && task.task_type === 'dev' && !!task.project_id
+    && taskGroupLeaders(task.developer_id).includes(DEMO_DEV_ID);
+
   // 模拟数据库触发器（0003）：enforce_task_rules / track_work_segments / notify_task_update
   // ⚠ 同步纪律：0003_triggers_seed.sql 的任何行为性修改必须同步到这里（见 supabase/migrations/README.md）
   const applyTaskRules = (old: Row, patch: Row): { patch?: Row; error?: string } => {
@@ -530,15 +547,13 @@ export function createDemoClient() {
       }
     }
 
-    // 1) 离开 review：当前 projects.owner_id 是唯一普通审批来源。
+    // 1) 离开 review：审批权来自任务负责人所属小组的组长关系。
     if (old.status === 'review' && next !== 'review') {
       const project = store.projects.find((x) => x.id === old.project_id);
-      if (old.project_id && !project?.owner_id) return { error: '项目缺少负责人，请先在项目管理中补充负责人后再审批' };
       const owner = store.developers.find((x) => x.id === project?.owner_id);
-      const isProjectOwner = project?.owner_id === DEMO_DEV_ID && owner?.is_active === true;
       const isAdminProxy = !!adminProxyReason;
-      if (!isProjectOwner && !isAdminProxy) {
-        return { error: '无审批权限：仅当前项目负责人可以审批；管理员请使用异常代办入口' };
+      if (!canApproveTask(old) && !isAdminProxy) {
+        return { error: '无审批权限：由任务负责人所属小组的组长审批；管理员请使用异常代办入口' };
       }
       if (next === 'done' || next === 'delayed_done') {
         // v2.3：完成时间 = 提交审核时间，延期判定也按提交时间
@@ -546,7 +561,7 @@ export function createDemoClient() {
         const overdue = old.due_date && completedAt.slice(0, 10) > old.due_date;
         p.status = overdue ? 'delayed_done' : 'done';
         p.completed_at = completedAt;
-        p.approved_by_role = 'admin';
+        p.approved_by_role = currentRole();
         p.approved_by_user = DEMO_DEV_ID;
         p.reject_note = null;
         notify(old.developer_id, 'task_approved', { task_id: old.id, title: old.title, result: p.status });
@@ -566,7 +581,7 @@ export function createDemoClient() {
         id: uuid(), task_id: old.id, project_id: old.project_id,
         project_owner_id: project?.owner_id ?? null,
         project_owner_name: owner?.name ?? null,
-        actor_id: DEMO_DEV_ID, actor_name: store.developers.find((x) => x.id === DEMO_DEV_ID)?.name ?? '演示管理员', actor_role: 'admin',
+        actor_id: DEMO_DEV_ID, actor_name: store.developers.find((x) => x.id === DEMO_DEV_ID)?.name ?? '演示管理员', actor_role: currentRole(),
         decision: next === 'in_progress' ? 'rejected' : 'approved',
         from_status: 'review', to_status: p.status ?? next,
         is_admin_proxy: isAdminProxy,
@@ -586,13 +601,10 @@ export function createDemoClient() {
       if (overdue && (!delayNote || !String(delayNote).trim())) return { error: '任务已超期，完成前需填写延期原因' };
       p.submitted_at = completedAt;
       if (old.project_id) {
-        const project = store.projects.find((x) => x.id === old.project_id);
-        if (!project?.owner_id) return { error: '项目缺少负责人，请先在项目管理中补充负责人后再提交审核' };
         p.status = 'review';
         p.completed_at = null;
         p.approved_by_role = null;
         p.approved_by_user = null;
-        notify(project.owner_id, 'task_submitted', { task_id: old.id, title: old.title });
       } else {
         p.status = overdue ? 'delayed_done' : 'done';
         p.completed_at = completedAt;
@@ -605,13 +617,10 @@ export function createDemoClient() {
     // 3) 测试通过：项目开发任务进入 review；测试任务自身已直接完成。
     if (old.task_type === 'dev' && old.status === 'testing' && ['review', 'done', 'delayed_done'].includes(next)) {
       if (old.project_id) {
-        const project = store.projects.find((x) => x.id === old.project_id);
-        if (!project?.owner_id) return { error: '项目缺少负责人，请先补充负责人后再提交测试结论' };
         p.status = 'review';
         p.completed_at = null;
         p.approved_by_role = null;
         p.approved_by_user = null;
-        notify(project.owner_id, 'task_submitted', { task_id: old.id, title: old.title });
       } else {
         const completedAt = old.submitted_at ?? now();
         const overdue = !!old.due_date && completedAt.slice(0, 10) > old.due_date;
@@ -643,7 +652,7 @@ export function createDemoClient() {
       return { error: '测试中的任务需等待测试结论' };
     }
 
-    // 3) review 期间锁定（镜像保留；演示账号恒为 admin，有审批权限，不会触发）
+    // 3) review 期间锁定任务字段。
 
     // 4) 挂起流转约束（v2.4，镜像 enforce_task_rules）
     if (next === 'paused' && old.status !== 'paused' && old.status !== 'in_progress') {
@@ -675,34 +684,12 @@ export function createDemoClient() {
       }
     }
 
+    if (old.status !== 'review' && p.status === 'review') {
+      for (const leaderId of taskGroupLeaders(old.developer_id)) {
+        notify(leaderId, 'task_submitted', { task_id: old.id, title: old.title });
+      }
+    }
     return { patch: p };
-  };
-
-  const taskCreationAccess = () => {
-    const role = store.user_roles.find((item) => item.user_id === DEMO_USER_ID)?.role ?? 'user';
-    const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
-    const managedDeveloperIds = new Set(
-      store.developer_teams.filter((member) => ledTeamIds.has(member.team_id)).map((member) => member.developer_id),
-    );
-    const canViewProject = (project: Row) =>
-      role === 'admin'
-      || project.owner_id === DEMO_DEV_ID
-      || ledTeamIds.has(project.team_id)
-      || store.tasks.some((task) => task.project_id === project.id && (
-        task.developer_id === DEMO_DEV_ID || managedDeveloperIds.has(task.developer_id)
-      ))
-      || store.test_plans.some((plan) => plan.project_id === project.id && (
-        plan.created_by === DEMO_DEV_ID
-        || store.test_cycles.some((cycle) => cycle.plan_id === plan.id && (
-          cycle.main_tester_id === DEMO_DEV_ID
-          || store.test_cycle_participants.some((participant) => participant.cycle_id === cycle.id && participant.developer_id === DEMO_DEV_ID)
-        ))
-      ));
-    const canUseTeamProject = (project: Row) =>
-      project.status === 'active' && store.developer_teams.some(
-        (member) => member.team_id === project.team_id && member.developer_id === DEMO_DEV_ID,
-      );
-    return { role, managedDeveloperIds, canViewProject, canUseTeamProject };
   };
 
   class Query implements PromiseLike<{ data: any; error: any }> {
@@ -746,9 +733,17 @@ export function createDemoClient() {
       }
       if (this.op === 'insert') {
         // 模拟数据库列默认值（真实库由 DEFAULT 子句处理）
-        const defaults: Row = TABLE_DEFAULTS[this.table] ?? {};
+        const defaults: Row = this.table === 'tasks' ? { ...TABLE_DEFAULTS.tasks, created_by: DEMO_DEV_ID } : TABLE_DEFAULTS[this.table] ?? {};
         const row: Row = { id: uuid(), created_at: now(), updated_at: now(), ...defaults, ...this.payload };
+        const role = currentRole();
+        if (this.table === 'projects' && role !== 'admin') {
+          return { data: null, error: { message: '仅管理员可以创建项目' } };
+        }
+        if (this.table === 'projects' && (row.team_id != null || row.legacy_team_id != null)) {
+          return { data: null, error: { message: '新项目由各小组共同使用' } };
+        }
         if (this.table === 'tasks') {
+          if (row.created_by !== DEMO_DEV_ID) return { data: null, error: { message: '任务创建人须为当前账号' } };
           const protectedLinks = [
             row.linked_task_id, row.test_result, row.test_note, row.test_plan_id,
             row.test_cycle_id, row.test_activity_id, row.construction_work_id, row.construction_task_id,
@@ -756,17 +751,19 @@ export function createDemoClient() {
           if (row.task_type !== 'dev' || row.work_source !== 'development' || protectedLinks.some((value) => value != null)) {
             return { data: null, error: { message: '测试活动和测试建设任务只能通过测试中心专用流程创建' } };
           }
+          const reviewFields = [row.submitted_at, row.completed_at, row.approved_by_role, row.approved_by_user, row.reject_note];
+          if (row.project_id && (row.status !== 'todo' || reviewFields.some((value) => value != null))) {
+            return { data: null, error: { message: '新建项目任务须从待处理状态开始' } };
+          }
 
-          const { role, managedDeveloperIds, canViewProject, canUseTeamProject } = taskCreationAccess();
-          const canAssign = row.developer_id === DEMO_DEV_ID || (role === 'manager' && managedDeveloperIds.has(row.developer_id));
-          const project = row.project_id ? store.projects.find((item) => item.id === row.project_id) : null;
-          const canCreateOwnTeamTask = row.developer_id === DEMO_DEV_ID && project
-            && row.team_id === project.team_id && canUseTeamProject(project);
+          const canAssign = row.developer_id === DEMO_DEV_ID || (role === 'manager' && store.developer_teams.some((member) =>
+            member.developer_id === row.developer_id && store.teams.some((team) => team.id === member.team_id && team.leader_id === DEMO_DEV_ID)
+          ));
           if (role !== 'admin' && !canAssign) {
             return { data: null, error: { message: '只能为本人或所带小组的有效成员创建开发任务' } };
           }
-          if (role !== 'admin' && row.project_id && !(project && canViewProject(project)) && !canCreateOwnTeamTask) {
-            return { data: null, error: { message: '无权在不可见项目下创建任务' } };
+          if (row.project_id && !store.projects.some((project) => project.id === row.project_id)) {
+            return { data: null, error: { message: '项目不存在' } };
           }
         }
         rows.push(row);
@@ -1202,8 +1199,6 @@ export function createDemoClient() {
         .map(({ project, eligibleTaskCount }) => ({
           id: project.id,
           name: project.name,
-          team_id: project.team_id,
-          team_name: store.teams.find((team) => team.id === project.team_id)?.name ?? '未知小组',
           test_state: project.test_state,
           eligible_task_count: eligibleTaskCount,
         }))
@@ -1908,13 +1903,15 @@ export function createDemoClient() {
       save(); return { data: project, error: null };
     }
 
-    if (name === 'change_project_governance') {
+    if (name === 'change_project_owner') {
       const project = store.projects.find((item) => item.id === params.p_project_id);
       const reason = String(params.p_reason ?? '').trim();
+      if (currentRole() !== 'admin') return err('仅管理员可以更换项目负责人');
       if (!project) return err('项目不存在');
-      if (!reason) return err('治理字段变更必须填写原因');
+      if (!reason) return err('更换负责人必须填写原因');
+      if (!store.developers.some((person) => person.id === params.p_owner_id && person.is_active)) return err('请选择有效的项目负责人');
       const before = { ...project };
-      Object.assign(project, { team_id: params.p_team_id, owner_id: params.p_owner_id, updated_at: now() });
+      Object.assign(project, { owner_id: params.p_owner_id, updated_at: now() });
       store.project_admin_action_audits.push({ id: uuid(), project_id: project.id, action: 'structure_update', before_data: before, after_data: { ...project }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
       save(); return { data: project, error: null };
     }
@@ -1954,13 +1951,17 @@ export function createDemoClient() {
       if (!from || task.status !== from) return err('当前任务状态不能执行该操作');
       if (params.p_action === 'submit' && task.due_date < day(0) && !String(params.p_delay_note ?? '').trim()) return err('逾期提交必须填写延期原因');
       const before = { ...task };
-      Object.assign(task, { status: to, delay_note: params.p_action === 'submit' ? String(params.p_delay_note ?? '').trim() : task.delay_note, updated_at: now() });
+      const result = applyTaskRules(task, params.p_action === 'submit'
+        ? { status: to, delay_note: String(params.p_delay_note ?? '').trim() || task.delay_note }
+        : { status: to });
+      if (result.error) return err(result.error);
+      Object.assign(task, result.patch, { updated_at: now() });
       store.task_management_audits.push({ id: uuid(), task_id: task.id, action: 'admin_execute', before_data: before, after_data: { ...task }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
       save(); return { data: task, error: null };
     }
 
     if (name === 'get_my_pending_approval_count') {
-      return { data: store.tasks.filter((task) => task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID).length, error: null };
+      return { data: store.tasks.filter(canApproveTask).length, error: null };
     }
 
     if (name === 'get_dashboard_task_counts') {
@@ -1969,7 +1970,7 @@ export function createDemoClient() {
         total: visible.length,
         in_progress: visible.filter((task) => task.status === 'in_progress').length,
         testing_active: visible.filter((task) => (task.task_type === 'dev' && task.status === 'testing') || (task.task_type === 'test' && !['done', 'delayed_done'].includes(task.status) && !task.test_result)).length,
-        pending_my_approval: visible.filter((task) => task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID).length,
+        pending_my_approval: visible.filter(canApproveTask).length,
         completed: visible.filter((task) => task.status === 'done').length,
         delayed_done: visible.filter((task) => task.status === 'delayed_done').length,
         overdue: visible.filter(isOverdue).length,
@@ -1977,11 +1978,9 @@ export function createDemoClient() {
     }
 
     if (name === 'get_task_creation_projects') {
-      const { canViewProject, canUseTeamProject } = taskCreationAccess();
       return {
         data: store.projects
-          .filter((project) => project.status === 'active' && (canViewProject(project) || canUseTeamProject(project)))
-          .map(({ id, name, team_id }) => ({ id, name, team_id }))
+          .map(({ id, name }) => ({ id, name }))
           .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
         error: null,
       };
@@ -2008,13 +2007,19 @@ export function createDemoClient() {
       const ledTeamIds = new Set(store.teams.filter((team) => team.leader_id === DEMO_DEV_ID).map((team) => team.id));
       const managedDeveloperIds = new Set((store.developer_teams ?? [])
         .filter((item) => ledTeamIds.has(item.team_id)).map((item) => item.developer_id));
+      managedDeveloperIds.add(DEMO_DEV_ID);
       let rows = store.tasks.filter((task) => {
         if (params.p_focus_id && task.id !== params.p_focus_id) return false;
         if (params.p_project_id && task.project_id !== params.p_project_id) return false;
         if (params.p_task_type && task.task_type !== params.p_task_type) return false;
         if (Array.isArray(params.p_statuses) && params.p_statuses.length && !params.p_statuses.includes(task.status)) return false;
         if (params.p_priority && task.priority !== params.p_priority) return false;
-        if (params.p_team_id && task.team_id !== params.p_team_id) return false;
+        if (params.p_team_id) {
+          const taskTeams = task.project_id && task.task_type === 'dev'
+            ? memberTeamIds(task.developer_id ?? task.created_by)
+            : new Set([task.team_id]);
+          if (!taskTeams.has(params.p_team_id)) return false;
+        }
         if (params.p_assignee === 'unassigned' && task.developer_id) return false;
         if (params.p_assignee && params.p_assignee !== 'unassigned' && task.developer_id !== params.p_assignee) return false;
         if (params.p_timing === 'overdue' && !isOverdue(task)) return false;
@@ -2023,7 +2028,7 @@ export function createDemoClient() {
           (task.task_type === 'dev' && task.status === 'testing') ||
           (task.task_type === 'test' && !completed(task) && !task.test_result)
         )) return false;
-        if (params.p_preset === 'pending_my_approval' && !(task.status === 'review' && store.projects.find((p) => p.id === task.project_id)?.owner_id === DEMO_DEV_ID)) return false;
+        if (params.p_preset === 'pending_my_approval' && !canApproveTask(task)) return false;
         if (params.p_preset === 'in_progress' && task.status !== 'in_progress') return false;
         if (params.p_preset === 'completed' && task.status !== 'done') return false;
         if (params.p_preset === 'delayed_done' && task.status !== 'delayed_done') return false;
@@ -2044,7 +2049,7 @@ export function createDemoClient() {
           if (!haystack.includes(query)) return false;
         }
         if (scope === 'mine' && task.developer_id !== DEMO_DEV_ID) return false;
-        if (scope === 'team' && task.developer_id !== DEMO_DEV_ID && !managedDeveloperIds.has(task.developer_id)) return false;
+        if (scope === 'team' && !managedDeveloperIds.has(task.developer_id) && !managedDeveloperIds.has(task.created_by)) return false;
         return true;
       });
       rows = rows.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
@@ -2100,12 +2105,12 @@ export function createDemoClient() {
       const task = store.tasks.find((t) => t.id === params.p_task_id);
       const reason = String(params.p_reason ?? '').trim();
       const rejectNote = String(params.p_reject_note ?? '').trim();
+      if (currentRole() !== 'admin') return err('仅管理员可执行异常代办');
       if (!task) return err('任务不存在');
       if (task.status !== 'review') return err('仅审核中的任务可执行异常代办');
+      if (task.task_type === 'test') return err('测试任务由测试流程处理');
       if (!reason) return err('管理员异常代办必须填写代办原因');
       if (reason.length > 2000) return err('代办原因不能超过 2000 个字符');
-      const project = store.projects.find((p) => p.id === task.project_id);
-      if (task.project_id && !project?.owner_id) return err('项目缺少负责人，请先在项目管理中补充负责人，不能回退给组长或管理员日常审批');
       if (!params.p_approve && !rejectNote) return err('驳回任务必须填写驳回原因');
       adminProxyReason = reason;
       const result = await new Query('tasks')

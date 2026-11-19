@@ -8,7 +8,7 @@ Gather 是一个面向研发团队的项目与任务管理系统。前端使用 
 - 开发人员、小组和项目管理
 - 任务创建、分配、状态流转、延期和工时记录
 - 统一测试中心、测试计划、测试轮次、测试报告和测试建设工作（前端默认隐藏）
-- 项目负责人审批、管理员代办审批及审批审计
+- 小组组长审批开发任务、管理员异常代办及审批审计
 - 项目驾驶舱、项目进度和测试质量汇总
 - 站内通知及实时刷新
 
@@ -110,6 +110,9 @@ npm run build
 0014_task_insert_returning_visibility.sql
 0015_test_hours_precision.sql
 0016_task_creation_project_options.sql
+0017_exclude_pending_review_from_overdue.sql
+0018_project_creation_and_team_task_review.sql
+0019_shared_projects_and_team_task_visibility.sql
 ```
 
 迁移包含表结构、RLS 策略、触发器和 RPC。请勿跳号、重复执行或在生产库中直接修改已执行迁移；详细操作见 [DEPLOY.md](DEPLOY.md)。

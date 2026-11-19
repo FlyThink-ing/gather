@@ -313,7 +313,7 @@ export default function TestPlanDetailPage() {
         ) : <Empty text={data.source === 'external_request' ? '外部测试不关联内部开发任务' : '本轮没有范围快照'} />}
       </Section>
 
-      <Section title="测试活动与实际工时" hint="活动生成工作任务，但由测试中心状态机控制，不经过项目负责人审批。">
+      <Section title="测试活动与实际工时" hint="活动生成的测试任务由测试中心流程处理。">
         <div className="space-y-2">
           {cycle.activities.map((item) => (
             <div key={item.id} className="grid gap-3 rounded-xl border border-slate-200 p-3 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,.7fr)_minmax(150px,.9fr)_100px_100px_auto] dark:border-slate-700">
@@ -356,7 +356,7 @@ export default function TestPlanDetailPage() {
       </Section>
 
       {(cycle.proposed_result || ['passed', 'failed'].includes(cycle.status)) && (
-        <Section title="结构化测试结论" hint="主测提交后由测试组长确认；测试组长确认不替代项目负责人逐项审批开发任务。">
+        <Section title="结构化测试结论" hint="主测提交后由测试组长确认；开发任务由任务负责人所属小组的组长审批。">
           <div className="grid gap-3 md:grid-cols-2">
             <ConclusionItem label="结论" value={cycle.proposed_result === 'pass' ? '通过' : '不通过'} />
             <ConclusionItem label="测试范围" value={cycle.conclusion_scope} />

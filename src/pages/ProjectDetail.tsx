@@ -28,7 +28,6 @@ import {
   type Developer,
   type ProjectCockpit,
   type ProjectTestSummary,
-  type Team,
 } from '../lib/types';
 import { formatEffort } from '../lib/workload';
 
@@ -41,7 +40,6 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { role, developer } = useAuth();
   const [data, setData] = useState<ProjectCockpit | null>(null);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [developers, setDevelopers] = useState<Developer[]>([]);
   const [projectTest, setProjectTest] = useState<ProjectTestSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,15 +57,13 @@ export default function ProjectDetail() {
     if (!id) return;
     setLoading(true);
     setError('');
-    const [cockpit, t, d, testing] = await Promise.all([
+    const [cockpit, d, testing] = await Promise.all([
       supabase.rpc('get_project_cockpit', { p_project_id: id }),
-      supabase.from('teams').select('*').order('name'),
       supabase.from('developers').select('*').order('name'),
       testingFeaturesEnabled ? supabase.rpc('get_project_test_summary', { p_project_id: id }) : { data: null },
     ]);
     if (cockpit.error) setError(cockpit.error.message);
     setData((cockpit.data as ProjectCockpit) ?? null);
-    setTeams((t.data as Team[]) ?? []);
     setDevelopers((d.data as Developer[]) ?? []);
     setProjectTest((testing.data as ProjectTestSummary) ?? null);
     setLoading(false);
@@ -89,7 +85,6 @@ export default function ProjectDetail() {
     return () => window.clearTimeout(timer);
   }, [loading, searchParams]);
 
-  const teamName = teams.find((team) => team.id === data?.team_id)?.name ?? '-';
   const owner = developers.find((dev) => dev.id === data?.owner_id);
   const canComplete = !!data && data.status !== 'completed' &&
     (role === 'admin' || (!!developer && data.owner_id === developer.id));
@@ -196,7 +191,6 @@ export default function ProjectDetail() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-xs text-blue-700 dark:text-blue-300">{PROJECT_STATUS_LABEL[data.status]}</span>
-                <span className="text-sm text-slate-500">{teamName}</span>
               </div>
               <p className="mt-3 max-w-4xl whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-600 dark:text-slate-300">{data.description || '暂无项目描述'}</p>
             </div>
@@ -217,7 +211,7 @@ export default function ProjectDetail() {
         <div className={`grid gap-3 sm:grid-cols-2 ${testingFeaturesEnabled ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
           <ActionMetric label="全部开发任务" value={data.dev_task_total} hint="统一任务入口" onClick={() => openTasks({ type: 'dev' })} />
           {testingFeaturesEnabled && <ActionMetric label="全部测试任务" value={data.test_task_total} hint={`共 ${data.test_round_total} 个测试轮次`} onClick={() => openTasks({ type: 'test' })} />}
-          <ActionMetric label="待审批任务" value={data.review_count} hint="由项目负责人逐项审批" onClick={() => openTasks({ status: 'review' })} />
+          <ActionMetric label="待审批任务" value={data.review_count} hint="由任务负责人所属小组的组长审批" onClick={() => openTasks({ status: 'review' })} />
           <ActionMetric label="当前风险" value={data.overdue_count + (testingFeaturesEnabled ? data.blocked_round_count : 0)} hint={testingFeaturesEnabled ? `${data.overdue_count} 逾期 · ${data.blocked_round_count} 阻断` : `${data.overdue_count} 逾期`} onClick={() => openTasks({ timing: 'overdue' })} />
         </div>
 

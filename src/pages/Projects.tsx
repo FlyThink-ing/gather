@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -14,7 +14,6 @@ import {
   Plus,
   ShieldAlert,
   UserCheck,
-  Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { projectCompletionMessage, testingFeaturesEnabled } from '../lib/testingFeatures';
@@ -29,7 +28,6 @@ import {
   type Project,
   type ProjectStatus,
   type ProjectSummary,
-  type Team,
   PROJECT_STATUS_LABEL,
 } from '../lib/types';
 import { formatEffort } from '../lib/workload';
@@ -43,14 +41,13 @@ const STATUS_CLS: Record<ProjectStatus, string> = {
 interface ProjectForm {
   name: string;
   description: string;
-  team_id: string;
   owner_id: string;
   start_date: string;
   end_date: string;
 }
 
 const emptyForm: ProjectForm = {
-  name: '', description: '', team_id: '', owner_id: '', start_date: '', end_date: '',
+  name: '', description: '', owner_id: '', start_date: '', end_date: '',
 };
 
 const pct = (value: number | null) => value == null ? '—' : `${value}%`;
@@ -59,10 +56,9 @@ export default function Projects() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { role, developer } = useAuth();
-  const canCreate = role === 'admin' || role === 'manager';
+  const canCreate = role === 'admin';
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [developers, setDevelopers] = useState<Developer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
@@ -76,7 +72,7 @@ export default function Projects() {
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [adminEditReason, setAdminEditReason] = useState('');
   const [governing, setGoverning] = useState<ProjectSummary | null>(null);
-  const [governance, setGovernance] = useState({ team_id: '', owner_id: '', reason: '' });
+  const [governance, setGovernance] = useState({ owner_id: '', reason: '' });
   const [transitioning, setTransitioning] = useState<ProjectSummary | null>(null);
   const [transitionReason, setTransitionReason] = useState('');
   const [notice, setNotice] = useState('');
@@ -84,14 +80,12 @@ export default function Projects() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadErr('');
-    const [summary, t, d] = await Promise.all([
+    const [summary, d] = await Promise.all([
       supabase.rpc('get_project_summaries'),
-      supabase.from('teams').select('*').order('name'),
       supabase.from('developers').select('*').order('name'),
     ]);
     if (summary.error) setLoadErr(summary.error.message);
     setProjects((summary.data as ProjectSummary[]) ?? []);
-    setTeams((t.data as Team[]) ?? []);
     setDevelopers((d.data as Developer[]) ?? []);
     setLoading(false);
   }, []);
@@ -105,23 +99,14 @@ export default function Projects() {
     return () => window.clearTimeout(timer);
   }, [loading, searchParams]);
 
-  const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? '-';
   const devName = (id: string | null) => developers.find((d) => d.id === id)?.name ?? '待指定';
   const isOwner = (p: Project | null) => !!developer && !!p && p.owner_id === developer.id;
   const canEditProject = (p: Project) => isOwner(p) || role === 'admin';
   const canCompleteProject = (p: Project) =>
     p.status !== 'completed' && (role === 'admin' || (!!developer && p.owner_id === developer.id));
 
-  const myLeaderTeams = useMemo(
-    () => teams.filter((t) => developer && t.leader_id === developer.id),
-    [teams, developer]
-  );
-  const selectableTeams = role === 'admin' ? teams : myLeaderTeams;
-  const canGovernProject = (p: Project) => role === 'admin' || (role === 'manager' && myLeaderTeams.some((team) => team.id === p.team_id));
-
   const openCreate = () => {
-    const auto = role === 'manager' && myLeaderTeams.length === 1 ? myLeaderTeams[0].id : '';
-    setForm({ ...emptyForm, team_id: auto, owner_id: developer?.id ?? '' });
+    setForm({ ...emptyForm, owner_id: developer?.id ?? '' });
     setFormErr('');
     setEditing('new');
   };
@@ -130,7 +115,6 @@ export default function Projects() {
     setForm({
       name: p.name,
       description: p.description ?? '',
-      team_id: p.team_id,
       owner_id: p.owner_id ?? '',
       start_date: p.start_date ?? '',
       end_date: p.end_date ?? '',
@@ -142,7 +126,6 @@ export default function Projects() {
 
   const save = async () => {
     if (!form.name.trim()) return setFormErr('请填写项目名称');
-    if (editing === 'new' && !form.team_id) return setFormErr('请选择所属小组（项目必须归属一个小组）');
     if (editing === 'new' && !form.owner_id) return setFormErr('请指定项目负责人');
     if (form.start_date && form.end_date && form.end_date < form.start_date) {
       return setFormErr('结束日期不能早于开始日期');
@@ -156,7 +139,7 @@ export default function Projects() {
       end_date: form.end_date || null,
     };
     const res = editing === 'new'
-      ? await supabase.from('projects').insert({ ...businessPayload, team_id: form.team_id, owner_id: form.owner_id, status: 'active', created_by: developer?.id ?? null })
+      ? await supabase.from('projects').insert({ ...businessPayload, owner_id: form.owner_id, status: 'active', created_by: developer?.id ?? null })
       : role === 'admin' && !isOwner(editing as Project)
         ? await supabase.rpc('admin_update_project_business', { p_project_id: (editing as Project).id, p_name: businessPayload.name, p_description: businessPayload.description, p_start_date: businessPayload.start_date, p_end_date: businessPayload.end_date, p_reason: adminEditReason.trim() })
         : await supabase.rpc('update_project_business', { p_project_id: (editing as Project).id, p_name: businessPayload.name, p_description: businessPayload.description, p_start_date: businessPayload.start_date, p_end_date: businessPayload.end_date });
@@ -167,10 +150,10 @@ export default function Projects() {
   };
 
   const saveGovernance = async () => {
-    if (!governing || !governance.team_id || !governance.owner_id || !governance.reason.trim()) return;
+    if (!governing || !governance.owner_id || !governance.reason.trim()) return;
     setSaving(true);
-    const { error } = await supabase.rpc('change_project_governance', {
-      p_project_id: governing.id, p_team_id: governance.team_id, p_owner_id: governance.owner_id, p_reason: governance.reason.trim(),
+    const { error } = await supabase.rpc('change_project_owner', {
+      p_project_id: governing.id, p_owner_id: governance.owner_id, p_reason: governance.reason.trim(),
     });
     setSaving(false);
     if (error) return setFormErr(error.message);
@@ -215,13 +198,6 @@ export default function Projects() {
     load();
   };
 
-  const editTeamOptions = useMemo(() => {
-    if (editing === 'new' || !editing) return selectableTeams;
-    const cur = teams.find((t) => t.id === (editing as Project).team_id);
-    if (cur && !selectableTeams.some((t) => t.id === cur.id)) return [cur, ...selectableTeams];
-    return selectableTeams;
-  }, [editing, selectableTeams, teams]);
-
   const openTasks = (project: ProjectSummary, filters: Record<string, string>) => {
     const params = new URLSearchParams({
       scope: 'all',
@@ -245,11 +221,6 @@ export default function Projects() {
         ) : undefined}
       />
 
-      {role === 'manager' && myLeaderTeams.length === 0 && (
-        <div className="mb-4 rounded-lg bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
-          你当前未担任任何小组的组长，暂时无法创建项目。
-        </div>
-      )}
       {loadErr && (
         <div className="mb-4 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           项目驾驶舱加载失败：{loadErr}
@@ -302,9 +273,9 @@ export default function Projects() {
                       <Pencil size={15} />
                     </button>
                   )}
-                  {canGovernProject(p) && (
-                    <button onClick={() => { setGoverning(p); setGovernance({ team_id: p.team_id, owner_id: p.owner_id ?? '', reason: '' }); setFormErr(''); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" title="调整归属与负责人">
-                      <Users size={15} />
+                  {role === 'admin' && (
+                    <button onClick={() => { setGoverning(p); setGovernance({ owner_id: p.owner_id ?? '', reason: '' }); setFormErr(''); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" title="更换项目负责人">
+                      <UserCheck size={15} />
                     </button>
                   )}
                   {(isOwner(p) || role === 'admin') && p.status !== 'completed' && (
@@ -357,7 +328,6 @@ export default function Projects() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800">
-                <span className="inline-flex items-center gap-1.5"><Users size={13} /> {teamName(p.team_id)}</span>
                 <span className="inline-flex items-center gap-1.5"><UserCheck size={13} /> 负责人：{devName(p.owner_id)}</span>
                 <span className="inline-flex items-center gap-1.5"><CalendarRange size={13} /> {p.start_date ?? '?'} ~ {p.end_date ?? '?'}</span>
                 {p.unassigned_count > 0 && (
@@ -377,13 +347,7 @@ export default function Projects() {
             <label className={labelCls}>项目名称 <span className="text-red-500">*</span></label>
             <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
-          {editing === 'new' ? <>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>所属小组 <span className="text-red-500">*</span></label>
-              <Select value={form.team_id} onChange={(v) => setForm({ ...form, team_id: v })} options={editTeamOptions.map((t) => ({ value: t.id, label: t.name }))} placeholder="请选择小组" />
-            </div>
-          </div>
+          {editing === 'new' ? (
           <div>
             <label className={labelCls}>项目负责人 <span className="text-red-500">*</span></label>
             <Select
@@ -392,10 +356,10 @@ export default function Projects() {
               options={developers.filter((d) => d.is_active || d.id === form.owner_id).map((d) => ({ value: d.id, label: `${d.name}（${d.position ?? '未设置职位'}${d.is_active ? '' : '，已停用'}）` }))}
               placeholder="请指定负责人"
             />
-            <p className="mt-1 text-xs text-slate-500">当前负责人是本项目全部开发任务的唯一普通审批人。</p>
+            <p className="mt-1 text-xs text-slate-500">项目负责人可查看本项目的全部任务。开发任务由任务负责人所属小组的组长审批。</p>
           </div>
-          </> : (
-            <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">小组、项目负责人和状态由“调整归属与负责人”及暂停/恢复/完成专用操作维护，普通编辑不会变更这些治理字段。</div>
+          ) : (
+            <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">项目负责人和项目状态可通过项目卡片上的对应操作调整。</div>
           )}
           <div className="grid grid-cols-2 gap-4">
             <div><label className={labelCls}>计划开始</label><DatePicker value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} /></div>
@@ -408,14 +372,12 @@ export default function Projects() {
         </div>
       </Modal>
 
-      <Modal title="调整项目归属与负责人" open={governing !== null} onClose={() => setGoverning(null)}>
+      <Modal title="更换项目负责人" open={governing !== null} onClose={() => setGoverning(null)}>
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">这是治理操作，会保留审计记录；不会通过普通项目编辑完成。</p>
-          <div><label className={labelCls}>所属小组 *</label><Select value={governance.team_id} onChange={(team_id) => setGovernance({ ...governance, team_id })} options={(role === 'admin' ? teams : myLeaderTeams).map((team) => ({ value: team.id, label: team.name }))} /></div>
           <div><label className={labelCls}>项目负责人 *</label><Select value={governance.owner_id} onChange={(owner_id) => setGovernance({ ...governance, owner_id })} options={developers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))} /></div>
           <div><label className={labelCls}>调整原因 *</label><textarea className={`${inputCls} h-20 resize-none`} value={governance.reason} onChange={(e) => setGovernance({ ...governance, reason: e.target.value })} /></div>
           {formErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{formErr}</div>}
-          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setGoverning(null)}>取消</button><button className={btnPrimary} disabled={saving || !governance.reason.trim()} onClick={saveGovernance}>确认调整</button></div>
+          <div className="flex justify-end gap-3"><button className={btnGhost} onClick={() => setGoverning(null)}>取消</button><button className={btnPrimary} disabled={saving || !governance.owner_id || !governance.reason.trim()} onClick={saveGovernance}>确认调整</button></div>
         </div>
       </Modal>
 

@@ -77,14 +77,13 @@ export async function addTeamMember(admin: HardeningSession, teamId: string, dev
 
 export async function createProject(
   admin: HardeningSession,
-  input: { name: string; teamId: string; ownerId: string; start: string; end: string },
+  input: { name: string; ownerId: string; start: string; end: string },
 ) {
   const result = await admin.rest.request<Array<{ id: string }>>(admin.page, 'projects', {
     method: 'POST',
     body: {
       name: input.name,
       description: 'UAT 权限加固自动化数据；仅用于验收并保留审计。',
-      team_id: input.teamId,
       owner_id: input.ownerId,
       created_by: admin.developerId,
       start_date: input.start,

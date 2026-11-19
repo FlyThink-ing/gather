@@ -20,22 +20,22 @@ const ROLE_CARDS: {
     role: 'admin',
     icon: <Shield size={18} />,
     iconCls: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
-    can: ['管理所有项目', '管理开发人员', '管理所有任务并审批', '管理小组与用户权限'],
+    can: ['创建和管理项目', '管理开发人员', '管理任务及异常代办审批', '管理小组与用户权限'],
     cannot: [],
   },
   {
     role: 'manager',
     icon: <UserCog size={18} />,
     iconCls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
-    can: ['管理各小组的人员', '创建本组项目', '审批本小组项目下的任务', '查看数据分析'],
+    can: ['管理各小组的人员', '查看数据分析'],
     cannot: ['不可管理小组设置', '不可管理权限'],
   },
   {
     role: 'user',
     icon: <UserIcon size={18} />,
     iconCls: 'bg-slate-500/15 text-slate-500 dark:text-slate-400',
-    can: ['查看所有项目/人员/任务', '创建并管理自己负责的任务'],
-    cannot: ['不可编辑他人任务', '不可删除任务', '无审批权限'],
+    can: ['查看权限范围内的项目和任务', '创建并管理自己负责的任务'],
+    cannot: ['不可编辑他人任务', '不可删除任务'],
   },
 ];
 
@@ -101,6 +101,7 @@ export default function UserRoles() {
   return (
     <div>
       <PageHeader title="权限管理" />
+      <p className="mb-4 text-sm text-slate-500">开发任务的审批人由「小组管理」中的组长和成员关系确定。</p>
 
       {/* 角色说明卡片 */}
       <div className="mb-6 grid gap-4 md:grid-cols-3">

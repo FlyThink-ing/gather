@@ -33,14 +33,15 @@ async function patchStatus(actor: Session, taskId: string, body: Record<string, 
   });
 }
 
-test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校验 @full', async ({ browser }, testInfo) => {
+test('UAT 任务开始、提交、小组组长批准/驳回及项目负责人越权校验 @full', async ({ browser }, testInfo) => {
   const adminCredentials = requireAccount('admin');
   const ownerCredentials = requireAccount('projectOwner');
-  const userCredentials = requireAccount('user');
+  const userCredentials = requireAccount('teamMember');
   const leadCredentials = requireAccount('testLead');
+  const groupLeadCredentials = requireAccount('user');
   test.skip(
-    new Set([adminCredentials.email, ownerCredentials.email, userCredentials.email, leadCredentials.email]).size < 4,
-    '任务全流程需要四个不同账号，才能可靠验证任务负责人、项目负责人和测试组长边界。',
+    new Set([adminCredentials.email, ownerCredentials.email, userCredentials.email, leadCredentials.email, groupLeadCredentials.email]).size < 5,
+    '任务全流程需要五个不同账号验证职责边界。',
   );
 
   const baseURL = String(testInfo.project.use.baseURL);
@@ -48,8 +49,9 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
   try {
     const admin = await session(browser, baseURL, 'admin'); sessions.push(admin);
     const owner = await session(browser, baseURL, 'projectOwner'); sessions.push(owner);
-    const assignee = await session(browser, baseURL, 'user'); sessions.push(assignee);
+    const assignee = await session(browser, baseURL, 'teamMember'); sessions.push(assignee);
     const testLead = await session(browser, baseURL, 'testLead'); sessions.push(testLead);
+    const groupLead = await session(browser, baseURL, 'user'); sessions.push(groupLead);
     const testTeams = await testLead.rest.request<Array<{ id: string }>>(
       testLead.page,
       `teams?select=id&is_test_team=eq.true&leader_id=eq.${testLead.developerId}&limit=1`,
@@ -57,22 +59,18 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
     const testTeamId = testTeams.data?.[0]?.id;
     test.skip(!testTeamId, 'UAT_TEST_LEAD 必须是 is_test_team 小组的 leader。');
 
-    const reusableTeams = await admin.rest.request<Array<{ id: string }>>(
-      admin.page,
-      `teams?select=id&name=eq.${encodeURIComponent('UAT-研发组')}&limit=1`,
-    );
-    expect(reusableTeams.status).toBe(200);
-    let teamId = reusableTeams.data?.[0]?.id;
-    if (!teamId) {
-      const team = await admin.rest.request<Array<{ id: string }>>(admin.page, 'teams', {
-        method: 'POST',
-        body: { name: `UAT-研发组-${uatEnv.runId}`, leader_id: owner.developerId, is_test_team: false },
-        prefer: 'return=representation',
-      });
-      expect(team.status).toBe(201);
-      teamId = team.data?.[0]?.id;
-    }
+    const team = await admin.rest.request<Array<{ id: string }>>(admin.page, 'teams', {
+      method: 'POST',
+      body: { name: `UAT-研发组-${uatEnv.runId}`, leader_id: groupLead.developerId, is_test_team: false },
+      prefer: 'return=representation',
+    });
+    expect(team.status).toBe(201);
+    const teamId = team.data?.[0]?.id;
     expect(teamId).toBeTruthy();
+    const membership = await admin.rest.request(admin.page, 'developer_teams', {
+      method: 'POST', body: { team_id: teamId, developer_id: assignee.developerId },
+    });
+    expect(membership.status).toBe(201);
 
     const today = new Date().toISOString().slice(0, 10);
     const due = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
@@ -82,7 +80,6 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
       body: {
         name: projectName,
         description: 'Playwright UAT 自动生成；仅用于验收，保留审计。',
-        team_id: teamId,
         owner_id: owner.developerId,
         created_by: admin.developerId,
         start_date: today,
@@ -132,24 +129,31 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
       expect(submitted.data?.[0]?.status).toBe('review');
     }
 
-    const forbidden = await patchStatus(testLead, approveTask.id, { status: 'done' });
-    expect(
-      forbidden.status >= 400 || (forbidden.status === 200 && forbidden.data?.length === 0),
-      '无权审批必须由错误响应或 RLS 空结果拒绝',
-    ).toBe(true);
+    const ownerTasks = await owner.rest.request<Array<{ id: string }>>(owner.page,
+      `tasks?select=id&project_id=eq.${projectId}&status=eq.review`);
+    expect(ownerTasks.data?.map(({ id }) => id).sort()).toEqual([approveTask.id, rejectTask.id].sort());
+    for (const actor of [owner, testLead]) {
+      const forbidden = await patchStatus(actor, approveTask.id, { status: 'done' });
+      expect(forbidden.status >= 400 || (forbidden.status === 200 && forbidden.data?.length === 0),
+        '无权审批必须由错误响应或 RLS 空结果拒绝').toBe(true);
+    }
     const stillReview = await admin.rest.request<Array<{ status: string }>>(admin.page, `tasks?select=status&id=eq.${approveTask.id}`);
     expect(stillReview.data?.[0]?.status).toBe('review');
 
-    const approved = await patchStatus(owner, approveTask.id, { status: 'done' });
+    const approved = await patchStatus(groupLead, approveTask.id, { status: 'done' });
     expect(approved.status).toBe(200);
     expect(approved.data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
 
-    const rejected = await patchStatus(owner, rejectTask.id, {
+    const rejected = await patchStatus(groupLead, rejectTask.id, {
       status: 'in_progress',
-      reject_note: 'UAT 自动化验证：项目负责人驳回后由任务负责人继续处理。',
+      reject_note: 'UAT 自动化验证：小组组长驳回后由任务负责人继续处理。',
     });
     expect(rejected.status).toBe(200);
     expect(rejected.data?.[0]?.status).toBe('in_progress');
+    const resubmitted = await patchStatus(assignee, rejectTask.id, { status: 'review' });
+    expect(resubmitted.data?.[0]?.status).toBe('review');
+    const approvedAfterReject = await patchStatus(groupLead, rejectTask.id, { status: 'done' });
+    expect(approvedAfterReject.data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
 
     const eligible = await owner.rest.request<{
       items: Array<{ id: string; eligible_task_count: number }>;
@@ -158,7 +162,7 @@ test('UAT 任务开始、提交、项目负责人批准/驳回及组长越权校
       body: { p_search: projectName },
     });
     expect(eligible.status).toBe(200);
-    expect(eligible.data?.items).toContainEqual(expect.objectContaining({ id: projectId, eligible_task_count: 1 }));
+    expect(eligible.data?.items).toContainEqual(expect.objectContaining({ id: projectId, eligible_task_count: 2 }));
 
     const internalPlanPayload = {
       p_source: 'internal_project',

@@ -31,7 +31,7 @@ import {
   TIMING_BADGE,
 } from '../lib/types';
 import { planDays, isTaskOverdue, taskTimingState } from '../lib/workload';
-import { defaultScope, SCOPE_LABEL, type DevTeamLink, type ScopeKey } from '../lib/scope';
+import { defaultScope, developerTeamIds, SCOPE_LABEL, taskTeamIds, type DevTeamLink, type ScopeKey } from '../lib/scope';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const formatDateTime = (value: string | null) =>
@@ -52,7 +52,7 @@ interface TaskForm {
   due_date: string;
 }
 
-type TaskCreationProject = Pick<Project, 'id' | 'name' | 'team_id'>;
+type TaskCreationProject = Pick<Project, 'id' | 'name'>;
 
 const emptyForm: TaskForm = {
   title: '',
@@ -225,7 +225,10 @@ export default function Tasks() {
   const devName = (id: string | null) => developers.find((d) => d.id === id)?.name ?? '未分配';
   const devPosition = (id: string | null) => developers.find((d) => d.id === id)?.position ?? '';
   const projectName = (id: string | null) => projects.find((p) => p.id === id)?.name ?? '-';
-  const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? '-';
+  const taskTeamNames = (task: Task) => {
+    const ids = taskTeamIds(task, teams, developerTeams);
+    return teams.filter((team) => ids.has(team.id)).map((team) => team.name).join('、');
+  };
 
   const isMine = (t: Task) => !!developer && t.developer_id === developer.id;
 
@@ -259,21 +262,19 @@ export default function Tasks() {
 
   const requiresProjectApproval = (t: Task) => t.task_type === 'dev' && !!t.project_id;
 
-  // 普通审批权限唯一来源于当前 projects.owner_id；角色、组长身份均不参与。
-  const canApprove = (t: Task) => {
-    if (t.status !== 'review') return false;
-    if (!developer) return false;
-    const project = projects.find((p) => p.id === t.project_id);
-    const owner = developers.find((d) => d.id === project?.owner_id);
-    return !!project?.owner_id && owner?.is_active === true && project.owner_id === developer.id;
+  const approvalLeaders = (t: Task) => {
+    if (!t.developer_id) return [];
+    const memberTeamIds = developerTeamIds(t.developer_id, teams, developerTeams);
+    const leaderIds = new Set(teams.filter((team) => memberTeamIds.has(team.id)).map((team) => team.leader_id));
+    return developers.filter((person) => leaderIds.has(person.id) && person.is_active && person.user_id);
   };
 
-  const canAdminProxy = (t: Task) => {
-    if (role !== 'admin' || t.status !== 'review' || t.task_type === 'test') return false;
-    const project = projects.find((p) => p.id === t.project_id);
-    if (t.project_id && !project?.owner_id) return false;
-    return !canApprove(t);
-  };
+  const canApprove = (t: Task) => t.status === 'review' && requiresProjectApproval(t)
+    && approvalLeaders(t).some((person) => person.id === developer?.id);
+
+  const canAdminProxy = (t: Task) => role === 'admin' && t.status === 'review' && t.task_type === 'dev' && !canApprove(t);
+
+  const approvalLeaderNames = (t: Task) => approvalLeaders(t).map((person) => person.name).join('、');
 
   const canEdit = (t: Task) => {
     if (t.work_source !== 'development') return false;
@@ -354,7 +355,6 @@ export default function Tasks() {
         description: form.description.trim() || null,
         project_id: project.id,
         developer_id: form.developer_id || null,
-        team_id: project.team_id,
         priority: form.priority,
         start_date: form.start_date,
         due_date: form.due_date,
@@ -387,9 +387,11 @@ export default function Tasks() {
 
   const start = (t: Task) => updateStatus(t, { status: 'in_progress' });
 
-  const canLeadManage = (t: Task) => role === 'manager' && !!developer && !!t.developer_id && developerTeams.some((member) =>
-    member.developer_id === t.developer_id && teams.some((team) => team.id === member.team_id && team.leader_id === developer.id)
-  );
+  const canLeadManage = (t: Task) => {
+    if (role !== 'manager' || !developer) return false;
+    const assigneeTeams = developerTeamIds(t.developer_id, teams, developerTeams);
+    return teams.some((team) => team.leader_id === developer.id && assigneeTeams.has(team.id));
+  };
   const openManage = (t: Task) => {
     setManaging(t);
     setManageForm({ developer_id: t.developer_id ?? '', start_date: t.start_date ?? todayStr(), due_date: t.due_date ?? todayStr(), priority: t.priority, reason: '' });
@@ -420,11 +422,6 @@ export default function Tasks() {
   };
 
   const submitReview = (t: Task) => {
-    const project = projects.find((p) => p.id === t.project_id);
-    if (t.project_id && !project?.owner_id) {
-      setNotice('该项目缺少负责人，请先在项目管理中补充负责人后再提交审核。');
-      return;
-    }
     if (isTaskOverdue(t)) {
       // 超期必须填延期备注（v2 §4.5），该弹窗本身即为确认
       setNoteText(t.delay_note ?? '');
@@ -524,9 +521,13 @@ export default function Tasks() {
   const developerOptions = developers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }));
   const managementDeveloperOptions = useMemo(() => {
     if (isAdmin || !managing) return developerOptions;
-    const teamMemberIds = new Set(developerTeams.filter((member) => member.team_id === managing.team_id).map((member) => member.developer_id));
-    return developerOptions.filter((option) => teamMemberIds.has(option.value));
-  }, [developerOptions, developerTeams, isAdmin, managing]);
+    const assigneeTeams = developerTeamIds(managing.developer_id, teams, developerTeams);
+    const managedTeams = teams.filter((team) => team.leader_id === developer?.id && assigneeTeams.has(team.id));
+    return developerOptions.filter((option) => {
+      const candidateTeams = developerTeamIds(option.value, teams, developerTeams);
+      return managedTeams.some((team) => candidateTeams.has(team.id));
+    });
+  }, [developer?.id, developerOptions, developerTeams, isAdmin, managing, teams]);
   const teamOptions = teams.map((t) => ({ value: t.id, label: t.name }));
 
   const withAll = (label: string, opts: { value: string; label: string }[]) => [
@@ -772,8 +773,8 @@ export default function Tasks() {
                     {isAdmin && t.work_source === 'development' && !!adminActionName(t) && !isMine(t) && (
                       <IconBtn title="管理员异常代执行（需原因）" tone="danger" onClick={() => { setAdminAction(t); setAdminActionReason(''); setManageErr(''); }}><ShieldAlert size={15} /></IconBtn>
                     )}
-                    {t.status === 'review' && t.project_id && !projects.find((p) => p.id === t.project_id)?.owner_id && (
-                      <span className="text-xs text-red-600 dark:text-red-400">请先补项目负责人</span>
+                    {t.status === 'review' && requiresProjectApproval(t) && !approvalLeaderNames(t) && (
+                      <span className="text-xs text-amber-700 dark:text-amber-300">任务负责人暂无可审批的组长</span>
                     )}
                     {/* 编辑/删除 */}
                     {canEdit(t) && (
@@ -848,7 +849,8 @@ export default function Tasks() {
             tasks={detailTasks}
             projects={projects}
             developers={developers}
-            teams={teams}
+            taskTeamNames={taskTeamNames(viewing)}
+            approvalLeaderNames={approvalLeaderNames(viewing)}
             actualDayCount={actualByTask.get(viewing.id) ?? 0}
             testRounds={testRounds}
             approvalAudits={approvalAudits}
@@ -914,7 +916,8 @@ export default function Tasks() {
               tasks={detailTasks}
               projects={projects}
               developers={developers}
-              teams={teams}
+              taskTeamNames={taskTeamNames(confirmApprove)}
+              approvalLeaderNames={approvalLeaderNames(confirmApprove)}
               actualDayCount={actualByTask.get(confirmApprove.id) ?? 0}
               testRounds={testRounds}
               approvalAudits={approvalAudits}
@@ -927,7 +930,7 @@ export default function Tasks() {
                   value={adminProxyReason}
                   onChange={(e) => setAdminProxyReason(e.target.value)}
                   maxLength={TASK_NOTE_MAX}
-                  placeholder="说明负责人离职、停用或系统异常等代办原因；该内容将写入审批审计"
+                  placeholder="说明组长离职、停用或系统异常等代办原因；该内容将写入审批审计"
                 />
                 <TextCounter value={adminProxyReason} max={TASK_NOTE_MAX} />
               </div>
@@ -1061,7 +1064,7 @@ export default function Tasks() {
           </p>
           <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
             {confirmSubmit && requiresProjectApproval(confirmSubmit)
-              ? `该任务属于项目，提交后将进入“待审核”，等待项目负责人「${devName(projects.find((p) => p.id === confirmSubmit.project_id)?.owner_id ?? null)}」审批。`
+              ? `提交后进入“待审核”，由任务负责人所属小组的组长审批。${approvalLeaderNames(confirmSubmit) ? `审批人：${approvalLeaderNames(confirmSubmit)}。` : '目前暂无可审批的组长。'}`
               : '该任务无项目归属，确认后将直接完成并锁定。'}
           </p>
           <div className="flex justify-end gap-3">
@@ -1118,7 +1121,7 @@ export default function Tasks() {
         <div className="space-y-4">
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {noteFor?.mode === 'delay'
-              ? `任务「${noteFor?.task.title}」已超过截止日期，完成前需说明延期原因。${noteFor?.task && requiresProjectApproval(noteFor.task) ? '提交后进入项目审批。' : '确认后直接标记为延期完成。'}`
+              ? `任务「${noteFor?.task.title}」已超过截止日期，完成前需说明延期原因。${noteFor?.task && requiresProjectApproval(noteFor.task) ? '提交后由任务负责人所属小组的组长审批。' : '确认后直接标记为延期完成。'}`
               : `审批驳回后任务「${noteFor?.task.title}」将退回「进行中」，负责人可修改后重新提交。`}
           </p>
           <textarea
@@ -1137,7 +1140,7 @@ export default function Tasks() {
                 value={adminProxyReason}
                 onChange={(e) => setAdminProxyReason(e.target.value)}
                 maxLength={TASK_NOTE_MAX}
-                placeholder="说明为何不能由项目负责人处理；该内容将写入审批审计"
+                placeholder="说明为何不能由组长处理；该内容将写入审批审计"
               />
               <TextCounter value={adminProxyReason} max={TASK_NOTE_MAX} />
             </div>
@@ -1178,7 +1181,8 @@ function TaskDetail({
   tasks,
   projects,
   developers,
-  teams,
+  taskTeamNames,
+  approvalLeaderNames,
   actualDayCount,
   testRounds,
   approvalAudits,
@@ -1188,7 +1192,8 @@ function TaskDetail({
   tasks: Task[];
   projects: Project[];
   developers: Developer[];
-  teams: Team[];
+  taskTeamNames: string;
+  approvalLeaderNames: string;
   actualDayCount: number;
   testRounds: TestRound[];
   approvalAudits: TaskApprovalAudit[];
@@ -1199,9 +1204,7 @@ function TaskDetail({
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const linkedTask = task.linked_task_id ? tasks.find((item) => item.id === task.linked_task_id) : null;
   const project = projects.find((item) => item.id === task.project_id);
-  const projectOwner = developers.find((item) => item.id === project?.owner_id);
   const owner = developers.find((item) => item.id === task.developer_id);
-  const team = teams.find((item) => item.id === task.team_id);
   const currentRound = testRounds.find((item) => item.test_task_id === task.id);
 
   const resultBadge = (result: Task['test_result']) => {
@@ -1245,16 +1248,16 @@ function TaskDetail({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <DetailItem label="所属项目" value={project?.name ?? '-'} />
         <DetailItem label="负责人" value={owner ? `${owner.name}${owner.position ? ` · ${owner.position}` : ''}` : '未分配'} />
-        <DetailItem label="所属小组" value={team?.name ?? '-'} />
+        <DetailItem label="所属小组" value={taskTeamNames || '-'} />
         <DetailItem
           label="审批归属"
           value={task.task_type === 'test'
             ? '测试结论即完成，测试任务不重复审批'
             : !task.project_id
               ? '无项目任务，由任务负责人直接完成'
-              : project?.owner_id
-                ? `项目负责人审批 · ${projectOwner?.name ?? '负责人账号已停用/不可用'}`
-                : '项目缺少负责人，请先补充负责人'}
+              : approvalLeaderNames
+                ? `所属小组组长审批 · ${approvalLeaderNames}`
+                : '任务负责人暂无可审批的组长'}
         />
         <DetailItem label="开始日期" value={task.start_date ?? '-'} />
         <DetailItem label="截止日期" value={task.due_date ?? '-'} />

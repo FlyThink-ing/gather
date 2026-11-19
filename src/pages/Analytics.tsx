@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Select from '../components/Select';
 import { planDays, actualDays, isTaskOverdue } from '../lib/workload';
-import { scopeTasks, defaultScope } from '../lib/scope';
+import { scopeTasks, defaultScope, taskTeamIds } from '../lib/scope';
 import {
   type Task, type Developer, type Project, type Team, type TaskStatus, type Priority, type WorkSegment, type TestRound,
   STATUS_LABEL, PRIORITY_LABEL, SEMANTIC_COLOR,
@@ -88,7 +88,7 @@ export default function Analytics() {
   const scoped = useMemo(() => {
     let list = roleScoped;
     if (fType) list = list.filter((t) => t.task_type === fType);
-    if (fTeam) list = list.filter((t) => t.team_id === fTeam);
+    if (fTeam) list = list.filter((t) => taskTeamIds(t, teams, devTeams).has(fTeam));
     if (range !== 'all') {
       const days = range === '7d' ? 7 : 30;
       const from = new Date();
@@ -102,7 +102,7 @@ export default function Analytics() {
       });
     }
     return list;
-  }, [roleScoped, fType, fTeam, range]);
+  }, [roleScoped, fType, fTeam, range, teams, devTeams]);
 
   // 测试质量（在角色/时间/小组范围内看全部测试任务，不受类型筛选影响）
   const testStats = useMemo(() => {

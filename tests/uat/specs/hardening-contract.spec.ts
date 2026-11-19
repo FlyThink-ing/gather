@@ -63,7 +63,7 @@ test('0012 权限、统计、工时与 UI 跨层合同完整 @hardening-static @
 
   expect(projects).toContain("supabase.rpc('update_project_business'");
   expect(projects).toContain("supabase.rpc('admin_update_project_business'");
-  expect(projects).toContain("supabase.rpc('change_project_governance'");
+  expect(projects).toContain("supabase.rpc('change_project_owner'");
   expect(tasks).toContain("supabase.rpc('lead_manage_task'");
   expect(tasks).toContain("supabase.rpc('admin_manage_task'");
   expect(tasks).toContain("supabase.rpc('admin_execute_task_action'");
@@ -78,7 +78,7 @@ test('0012 权限、统计、工时与 UI 跨层合同完整 @hardening-static @
   expect(plan).toContain('whitespace-nowrap');
 
   for (const rpcName of [
-    'update_project_business', 'admin_update_project_business', 'change_project_governance',
+    'update_project_business', 'admin_update_project_business', 'change_project_owner',
     'lead_manage_task', 'admin_manage_task', 'admin_execute_task_action',
     'get_my_pending_approval_count', 'get_dashboard_task_counts',
     'get_test_work_entries', 'update_test_work_entry', 'void_test_work_entry',

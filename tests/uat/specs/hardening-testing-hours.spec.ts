@@ -39,16 +39,16 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
       await addTeamMember(actors.admin, testTeam, actors.testParticipant.developerId);
       const projectName = `UAT-VIS-TEST-01-${suffix}`;
       const projectId = await createProject(actors.admin, {
-        name: projectName, teamId: projectTeam, ownerId: actors.crossGroupOwner.developerId, start, end,
+        name: projectName, ownerId: actors.crossGroupOwner.developerId, start, end,
       });
       const tasks = await createTasks(actors.admin, ['ready-first', 'still-open'].map((name) => ({
         title: `UAT-VIS-TEST-${name}-${suffix}`, projectId,
         developerId: actors.teamMember.developerId, teamId: projectTeam, start, due: end,
       })));
 
-      await approveTask(actors.teamMember, actors.crossGroupOwner, tasks[0].id);
+      await approveTask(actors.teamMember, actors.teamLead, tasks[0].id);
       await expectCandidate(actors.crossGroupOwner, projectId, projectName, false);
-      await approveTask(actors.teamMember, actors.crossGroupOwner, tasks[1].id);
+      await approveTask(actors.teamMember, actors.teamLead, tasks[1].id);
       await expectCandidate(actors.crossGroupOwner, projectId, projectName, true);
 
       const title = `UAT-内部计划-${suffix}`;
@@ -136,6 +136,12 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
       const suffix = `${uatEnv.runId}-hours`;
       const day1 = '2099-01-10';
       const day2 = '2099-01-11';
+      const [testerDay1Before, testerDay2Before, automationBefore, leadBefore] = await Promise.all([
+        resource(actors.testEngineer, day1, day1),
+        resource(actors.testEngineer, day2, day2),
+        resource(actors.automationTester, day1, day2),
+        resource(actors.testLead, day1, day2),
+      ]);
       const testTeam = await createTeam(actors.admin, `UAT-工时测试组-${suffix}`, actors.testLead.developerId, true);
       await addTeamMember(actors.admin, testTeam, actors.testEngineer.developerId);
       await addTeamMember(actors.admin, testTeam, actors.automationTester.developerId);
@@ -190,8 +196,8 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
 
       const day1Resource = await resource(actors.testEngineer, day1, day1);
       const day2Resource = await resource(actors.testEngineer, day2, day2);
-      expect(Number(day1Resource.totals.all_sources)).toBeCloseTo(2.5, 5);
-      expect(Number(day2Resource.totals.all_sources)).toBeCloseTo(2.5, 5);
+      expect(Number(day1Resource.totals.all_sources) - Number(testerDay1Before.totals.all_sources)).toBeCloseTo(2.5, 5);
+      expect(Number(day2Resource.totals.all_sources) - Number(testerDay2Before.totals.all_sources)).toBeCloseTo(2.5, 5);
 
       const entries = await rpc<{ items: Array<{ id: string; voided_at: string | null }>; audits: Array<{ action: string }> }>(
         actors.testEngineer,
@@ -227,9 +233,10 @@ test.describe('权限与流程加固：测试可见性、工时和布局 @harden
       const testerResource = await resource(actors.testEngineer, day1, day2);
       const automationResource = await resource(actors.automationTester, day1, day2);
       const leadResource = await resource(actors.testLead, day1, day2);
-      expect(Number(testerResource.totals.all_sources)).toBeCloseTo(4.75, 5);
-      expect(Number(automationResource.totals.all_sources)).toBeCloseTo(4, 5);
-      expect(Number(leadResource.totals.all_sources)).toBeCloseTo(8.75, 5);
+      const testerBefore = Number(testerDay1Before.totals.all_sources) + Number(testerDay2Before.totals.all_sources);
+      expect(Number(testerResource.totals.all_sources) - testerBefore).toBeCloseTo(4.75, 5);
+      expect(Number(automationResource.totals.all_sources) - Number(automationBefore.totals.all_sources)).toBeCloseTo(4, 5);
+      expect(Number(leadResource.totals.all_sources) - Number(leadBefore.totals.all_sources)).toBeCloseTo(8.75, 5);
       expect(testerResource.rows.some((row) => row.developer_id === actors.automationTester.developerId)).toBe(false);
       expect(automationResource.rows.some((row) => row.developer_id === actors.testEngineer.developerId)).toBe(false);
 
@@ -339,10 +346,10 @@ async function openActors<K extends AccountKey>(browser: Browser, baseURL: strin
   return result;
 }
 
-async function approveTask(assignee: HardeningSession, owner: HardeningSession, taskId: string) {
+async function approveTask(assignee: HardeningSession, teamLead: HardeningSession, taskId: string) {
   expect((await patchTask(assignee, taskId, { status: 'in_progress' })).data?.[0]?.status).toBe('in_progress');
   expect((await patchTask(assignee, taskId, { status: 'review' })).data?.[0]?.status).toBe('review');
-  expect((await patchTask(owner, taskId, { status: 'done' })).data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
+  expect((await patchTask(teamLead, taskId, { status: 'done' })).data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
 }
 
 async function expectCandidate(actor: HardeningSession, projectId: string, projectName: string, expected: boolean) {

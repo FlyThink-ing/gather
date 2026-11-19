@@ -35,7 +35,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       await addTeamMember(actors.admin, ownerTeam, actors.teamMember.developerId);
       const projectName = `UAT-AUTH-PROJ-01-${suffix}`;
       const projectId = await createProject(actors.admin, {
-        name: projectName, teamId: ownerTeam, ownerId: actors.crossGroupOwner.developerId, start, end,
+        name: projectName, ownerId: actors.crossGroupOwner.developerId, start, end,
       });
       await createTasks(actors.admin, [{
         title: `UAT-AUTH-PROJ-可见任务-${suffix}`,
@@ -43,10 +43,15 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       }]);
 
       await assertProjectUi(actors.crossGroupOwner, projectName, { visible: true, edit: true, govern: false });
-      await assertProjectUi(actors.teamLead, projectName, { visible: true, edit: false, govern: true });
+      await assertProjectUi(actors.teamLead, projectName, { visible: true, edit: false, govern: false });
       await assertProjectUi(actors.teamMember, projectName, { visible: true, edit: false, govern: false });
       await assertProjectUi(actors.otherTeamLead, projectName, { visible: false, edit: false, govern: false });
       await assertProjectUi(actors.admin, projectName, { visible: true, edit: true, govern: true });
+      await actors.admin.page.getByRole('button', { name: '添加项目', exact: true }).click();
+      const createProjectDialog = actors.admin.page.getByRole('dialog', { name: '添加项目' });
+      await expect(createProjectDialog.locator('label').filter({ hasText: '项目负责人' })).toBeVisible();
+      await expect(createProjectDialog.locator('label').filter({ hasText: '所属小组' })).toHaveCount(0);
+      await createProjectDialog.getByRole('button', { name: '取消', exact: true }).click();
 
       const ownerDescription = `UAT owner business update ${suffix}`;
       const ownerUpdate = await rpc(actors.crossGroupOwner, 'update_project_business', {
@@ -69,16 +74,17 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
         await expectProjectDescription(actors.admin, projectId, ownerDescription);
       }
 
-      const foreignGovernance = await rpc(actors.otherTeamLead, 'change_project_governance', {
-        p_project_id: projectId, p_team_id: ownerTeam, p_owner_id: actors.crossGroupOwner.developerId,
-        p_reason: 'UAT 异组组长越权治理验证',
+      for (const actor of [actors.teamLead, actors.otherTeamLead, actors.crossGroupOwner]) {
+        const denied = await rpc(actor, 'change_project_owner', {
+          p_project_id: projectId, p_owner_id: actors.teamMember.developerId, p_reason: 'UAT 非管理员更换项目负责人',
+        });
+        expect(denied.status).toBeGreaterThanOrEqual(400);
+      }
+      const ownerChange = await rpc<{ owner_id: string }>(actors.admin, 'change_project_owner', {
+        p_project_id: projectId, p_owner_id: actors.teamMember.developerId, p_reason: 'UAT 管理员更换项目负责人',
       });
-      expect(foreignGovernance.status).toBeGreaterThanOrEqual(400);
-      const leadGovernance = await rpc(actors.teamLead, 'change_project_governance', {
-        p_project_id: projectId, p_team_id: ownerTeam, p_owner_id: actors.crossGroupOwner.developerId,
-        p_reason: 'UAT 归属组长治理审计验证',
-      });
-      expect(leadGovernance.status).toBe(200);
+      expect(ownerChange.status).toBe(200);
+      expect(ownerChange.data?.owner_id).toBe(actors.teamMember.developerId);
 
       const adminNoReason = await rpc(actors.admin, 'admin_update_project_business', {
         p_project_id: projectId, p_name: projectName, p_description: 'FORBIDDEN-ADMIN-NO-REASON',
@@ -99,7 +105,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
         `project_admin_action_audits?select=action,reason&project_id=eq.${projectId}`,
       );
       expect(audits.data).toEqual(expect.arrayContaining([
-        expect.objectContaining({ action: 'structure_update', reason: 'UAT 归属组长治理审计验证' }),
+        expect.objectContaining({ action: 'structure_update', reason: 'UAT 管理员更换项目负责人' }),
         expect.objectContaining({ action: 'business_update', reason: 'UAT 管理员异常处置原因' }),
       ]));
     } finally {
@@ -122,13 +128,28 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       await addTeamMember(actors.admin, teamId, actors.teamMember.developerId);
       const projectName = `UAT-AUTH-TASK-01-${suffix}`;
       const projectId = await createProject(actors.admin, {
-        name: projectName, teamId, ownerId: actors.crossGroupOwner.developerId, start, end,
+        name: projectName, ownerId: actors.crossGroupOwner.developerId, start, end,
       });
+      await actors.teamLead.page.goto('/#/projects');
+      await expect(actors.teamLead.page.getByRole('button', { name: '添加项目', exact: true })).toHaveCount(0);
+      const managerCreate = await actors.teamLead.rest.request(actors.teamLead.page, 'projects', {
+        method: 'POST', body: { name: `${projectName}-FORBIDDEN`, owner_id: actors.teamLead.developerId },
+      });
+      expect(managerCreate.status).toBeGreaterThanOrEqual(400);
+
       const invisibleProjectName = `UAT-AUTH-TASK-不可见项目-${suffix}`;
       const invisibleProjectId = await createProject(actors.admin, {
-        name: invisibleProjectName, teamId: otherTeamId,
+        name: invisibleProjectName,
         ownerId: actors.otherTeamLead.developerId, start, end,
       });
+      const pauseProject = await rpc(actors.otherTeamLead, 'transition_project', {
+        p_project_id: invisibleProjectId, p_action: 'pause',
+      });
+      expect(pauseProject.status).toBe(200);
+      const privateProject = await actors.teamMember.rest.request<unknown[]>(
+        actors.teamMember.page, `projects?select=id&id=eq.${invisibleProjectId}`,
+      );
+      expect(privateProject.data).toEqual([]);
       await createTasks(actors.teamLead, [{
         title: `UAT-AUTH-TASK-组长本人任务-${suffix}`, projectId,
         developerId: actors.teamLead.developerId, teamId, start, due: end,
@@ -139,8 +160,8 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       const createDialog = memberPage.getByRole('dialog', { name: '添加任务' });
       await createDialog.getByRole('button', { name: '请选择项目', exact: true }).click();
       await expect(memberPage.getByRole('button', { name: projectName, exact: true })).toBeVisible();
-      await expect(memberPage.getByRole('button', { name: invisibleProjectName, exact: true })).toHaveCount(0);
-      await memberPage.getByRole('button', { name: projectName, exact: true }).click();
+      await memberPage.getByRole('button', { name: invisibleProjectName, exact: true }).click();
+      await expect(createDialog.getByRole('button', { name: invisibleProjectName, exact: true })).toBeVisible();
       await createDialog.getByRole('button', { name: '取消', exact: true }).click();
 
       const legalSelfTitle = `UAT-AUTH-TASK-LEGAL-SELF-${suffix}`;
@@ -151,7 +172,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
           method: 'POST',
           body: {
             title: legalSelfTitle, description: 'UAT 合法本人开发任务', project_id: projectId,
-            developer_id: actors.teamMember.developerId, team_id: teamId, start_date: start, due_date: end,
+            developer_id: actors.teamMember.developerId, start_date: start, due_date: end,
             created_by: actors.teamMember.developerId, task_type: 'dev', work_source: 'development',
           },
           prefer: 'return=representation',
@@ -175,6 +196,8 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
         { marker: 'TEST-ACTIVITY', task_type: 'dev', work_source: 'test_activity' },
         { marker: 'CONSTRUCTION', task_type: 'dev', work_source: 'construction' },
         { marker: 'TASK-TYPE-TEST', task_type: 'test', work_source: 'development' },
+        { marker: 'ALREADY-APPROVED', task_type: 'dev', work_source: 'development', status: 'done' },
+        { marker: 'CREATOR', task_type: 'dev', work_source: 'development', created_by: actors.otherTeamLead.developerId },
       ];
       for (const forged of forgedRows) {
         const title = `UAT-AUTH-TASK-FORGED-${forged.marker}-${suffix}`;
@@ -182,8 +205,8 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
           method: 'POST',
           body: {
             title, project_id: projectId, developer_id: actors.teamMember.developerId, team_id: teamId,
-            start_date: start, due_date: end, created_by: actors.teamMember.developerId,
-            task_type: forged.task_type, work_source: forged.work_source,
+            start_date: start, due_date: end, created_by: forged.created_by ?? actors.teamMember.developerId,
+            task_type: forged.task_type, work_source: forged.work_source, status: forged.status,
           },
           prefer: 'return=representation',
         });
@@ -192,7 +215,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       }
 
       const invisibleTitle = `UAT-AUTH-TASK-INVISIBLE-PROJECT-${suffix}`;
-      const invisibleAttach = await actors.teamMember.rest.request(actors.teamMember.page, 'tasks', {
+      const invisibleAttach = await actors.teamMember.rest.request<Array<{ id: string }>>(actors.teamMember.page, 'tasks', {
         method: 'POST',
         body: {
           title: invisibleTitle, project_id: invisibleProjectId,
@@ -202,8 +225,48 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
         },
         prefer: 'return=representation',
       });
-      expect(invisibleAttach.status, '普通用户不得用已知 UUID 把自建任务挂到不可见项目').toBeGreaterThanOrEqual(400);
-      await expectNoTaskByTitle(actors.admin, invisibleTitle);
+      expect(invisibleAttach.status, '普通用户可在跨组、已暂停的项目下创建本人任务').toBe(201);
+      const crossGroupTaskId = invisibleAttach.data![0].id;
+      for (const [groupId, expected] of [[teamId, 1], [otherTeamId, 0]] as const) {
+        const filtered = await rpc<{ total: number }>(actors.admin, 'list_tasks', listTasksBody({
+          p_focus_id: crossGroupTaskId, p_team_id: groupId,
+        }));
+        expect(filtered.data?.total).toBe(expected);
+      }
+      await move(actors.teamMember, crossGroupTaskId, 'in_progress');
+      await move(actors.teamMember, crossGroupTaskId, 'review');
+      const leadNotification = await actors.teamLead.rest.request<unknown[]>(actors.teamLead.page,
+        `notifications?select=id&type=eq.task_submitted&payload->>task_id=eq.${crossGroupTaskId}`);
+      expect(leadNotification.data).toHaveLength(1);
+      await expectDenied(await patchTask(actors.otherTeamLead, crossGroupTaskId, { status: 'done' }));
+      expect((await patchTask(actors.teamLead, crossGroupTaskId, { status: 'done' })).data?.[0]?.status).toBe('done');
+
+      await addTeamMember(actors.admin, otherTeamId, actors.outsider.developerId);
+      const [ownersTeamTask] = await createTasks(actors.admin, [{
+        title: `UAT-项目负责人兼组长-${suffix}`, projectId: invisibleProjectId,
+        developerId: actors.outsider.developerId, start, due: end,
+      }]);
+      await move(actors.outsider, ownersTeamTask.id, 'in_progress');
+      await move(actors.outsider, ownersTeamTask.id, 'review');
+      expect((await patchTask(actors.otherTeamLead, ownersTeamTask.id, { status: 'done' })).data?.[0]?.status).toBe('done');
+
+      await addTeamMember(actors.admin, otherTeamId, actors.teamLead.developerId);
+      const [creatorGroupTask] = await createTasks(actors.teamLead, [{
+        title: `UAT-创建人所属组可见-${suffix}`, projectId,
+        developerId: actors.teamMember.developerId, start, due: end,
+      }]);
+      await move(actors.teamMember, creatorGroupTask.id, 'in_progress');
+      await move(actors.teamMember, creatorGroupTask.id, 'review');
+      const creatorGroupDirect = await actors.otherTeamLead.rest.request<Array<{ id: string }>>(
+        actors.otherTeamLead.page, `tasks?select=id&id=eq.${creatorGroupTask.id}`,
+      );
+      expect(creatorGroupDirect.data).toEqual([{ id: creatorGroupTask.id }]);
+      const creatorGroupList = await rpc<{ total: number }>(actors.otherTeamLead, 'list_tasks', listTasksBody({
+        p_scope: 'team', p_focus_id: creatorGroupTask.id,
+      }));
+      expect(creatorGroupList.data?.total).toBe(1);
+      await expectDenied(await patchTask(actors.otherTeamLead, creatorGroupTask.id, { status: 'done' }));
+      expect((await patchTask(actors.teamLead, creatorGroupTask.id, { status: 'done' })).data?.[0]?.status).toBe('done');
 
       await move(actors.teamMember, byName('in-progress').id, 'in_progress');
       await move(actors.teamMember, byName('paused').id, 'in_progress');
@@ -220,7 +283,8 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
 
       await assertTaskUi(actors.teamMember, byName('todo').id, { visible: true, titles: ['开始', '编辑'], absent: ['本组改派/调整计划（需原因）'] });
       await assertTaskUi(actors.teamLead, byName('todo').id, { visible: true, titles: ['本组改派/调整计划（需原因）'], absent: ['开始', '编辑'] });
-      await assertTaskUi(actors.crossGroupOwner, byName('review-owner').id, { visible: true, titles: ['审批通过（需确认详情）'], absent: ['编辑'] });
+      await assertTaskUi(actors.crossGroupOwner, byName('review-owner').id, { visible: true, titles: [], absent: ['审批通过（需确认详情）', '审批驳回', '编辑'] });
+      await assertTaskUi(actors.teamLead, byName('review-owner').id, { visible: true, titles: ['审批通过（需确认详情）', '审批驳回'], absent: ['编辑'] });
       await assertTaskUi(actors.otherTeamLead, byName('todo').id, { visible: false, titles: [], absent: ['开始', '编辑'] });
       await assertTaskUi(actors.outsider, byName('todo').id, { visible: false, titles: [], absent: ['开始', '编辑'] });
       await assertTaskUi(actors.admin, byName('admin-action').id, {
@@ -263,10 +327,10 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       expect((await patchTask(actors.teamMember, byName('in-progress').id, { status: 'paused' })).data?.[0]?.status).toBe('paused');
       expect((await patchTask(actors.teamMember, byName('paused').id, { status: 'in_progress' })).data?.[0]?.status).toBe('in_progress');
 
-      const wrongApproval = await patchTask(actors.teamLead, byName('review-owner').id, { status: 'done' });
+      const wrongApproval = await patchTask(actors.crossGroupOwner, byName('review-owner').id, { status: 'done' });
       await expectDenied(wrongApproval);
       const reviewBefore = await taskRecord(actors.admin, byName('review-owner').id);
-      const smuggledApproval = await patchTask(actors.crossGroupOwner, byName('review-owner').id, {
+      const smuggledApproval = await patchTask(actors.teamLead, byName('review-owner').id, {
         status: 'done',
         title: `${reviewBefore.title}-FORBIDDEN`,
         priority: 'urgent',
@@ -276,10 +340,10 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
         start_date: isoDate(1),
         due_date: isoDate(2),
       });
-      expect(smuggledApproval.status, '项目 owner 审批时夹带业务字段必须整体失败').toBeGreaterThanOrEqual(400);
+      expect(smuggledApproval.status, '组长审批时夹带业务字段必须整体失败').toBeGreaterThanOrEqual(400);
       expect(await taskRecord(actors.admin, byName('review-owner').id)).toEqual(reviewBefore);
-      const ownerApproval = await patchTask(actors.crossGroupOwner, byName('review-owner').id, { status: 'done' });
-      expect(ownerApproval.data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
+      const leadApproval = await patchTask(actors.teamLead, byName('review-owner').id, { status: 'done' });
+      expect(leadApproval.data?.[0]?.status).toMatch(/^(done|delayed_done)$/);
       const doneBefore = await taskRecord(actors.admin, byName('review-owner').id);
       const doneRewrite = await patchTask(actors.teamMember, byName('review-owner').id, {
         status: doneBefore.status, title: `${doneBefore.title}-FORBIDDEN`,
@@ -287,7 +351,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       expect(doneRewrite.status, 'done 同状态字段更新必须失败').toBeGreaterThanOrEqual(400);
       expect(await taskRecord(actors.admin, byName('review-owner').id)).toEqual(doneBefore);
 
-      const delayedApproval = await patchTask(actors.crossGroupOwner, byName('review-delayed').id, { status: 'done' });
+      const delayedApproval = await patchTask(actors.teamLead, byName('review-delayed').id, { status: 'done' });
       expect(delayedApproval.data?.[0]?.status).toBe('delayed_done');
       const delayedBefore = await taskRecord(actors.admin, byName('review-delayed').id);
       const delayedRewrite = await patchTask(actors.teamMember, byName('review-delayed').id, {
@@ -352,7 +416,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       const emptyTeam = await createTeam(actors.admin, `UAT-范围空组-${suffix}`, actors.emptyManager.developerId);
       await addTeamMember(actors.admin, populatedTeam, actors.teamMember.developerId);
       const projectId = await createProject(actors.admin, {
-        name: `UAT-VIS-TASK-01-${suffix}`, teamId: populatedTeam,
+        name: `UAT-VIS-TASK-01-${suffix}`,
         ownerId: actors.teamLead.developerId, start, end,
       });
       const rows = await createTasks(actors.admin, [
@@ -415,7 +479,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       const teamId = await createTeam(admin, `UAT-审核时间-${suffix}`, teamLead.developerId);
       await addTeamMember(admin, teamId, teamMember.developerId);
       const projectId = await createProject(admin, {
-        name: `UAT-审核时间项目-${suffix}`, teamId, ownerId: teamLead.developerId, start, end: isoDate(7),
+        name: `UAT-审核时间项目-${suffix}`, ownerId: teamLead.developerId, start, end: isoDate(7),
       });
       const before = await rpc<{ overdue: number; pending_my_approval: number }>(teamLead, 'get_dashboard_task_counts');
       expect(before.status).toBe(200);
@@ -479,9 +543,8 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
     const baseURL = String(testInfo.project.use.baseURL);
     try {
       const actors = await openActors(browser, baseURL, keys, sessions);
-      const before = await rpc<number>(actors.crossGroupOwner, 'get_my_pending_approval_count');
+      const before = await rpc<number>(actors.teamLead, 'get_my_pending_approval_count');
       expect(before.status).toBe(200);
-      expect(before.data, 'UAT_CROSS_GROUP_OWNER 必须是无历史待审批的专用账号，才能验证恰好 1 条').toBe(0);
 
       const suffix = `${uatEnv.runId}-review-count`;
       const start = isoDate();
@@ -490,7 +553,7 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       await addTeamMember(actors.admin, teamId, actors.teamMember.developerId);
       const projectName = `UAT-COUNT-REVIEW-01-${suffix}`;
       const projectId = await createProject(actors.admin, {
-        name: projectName, teamId, ownerId: actors.crossGroupOwner.developerId, start, end,
+        name: projectName, ownerId: actors.crossGroupOwner.developerId, start, end,
       });
       const [task] = await createTasks(actors.admin, [{
         title: `UAT-唯一待审批-${suffix}`, projectId, developerId: actors.teamMember.developerId, teamId, start, due: end,
@@ -498,32 +561,35 @@ test.describe('权限与流程加固：项目、任务、范围和统计 @harden
       await move(actors.teamMember, task.id, 'in_progress');
       await move(actors.teamMember, task.id, 'review');
 
-      const pending = await rpc<number>(actors.crossGroupOwner, 'get_my_pending_approval_count');
-      const dashboard = await rpc<{ pending_my_approval: number }>(actors.crossGroupOwner, 'get_dashboard_task_counts');
-      const list = await rpc<{ items: Array<{ id: string }>; total: number }>(actors.crossGroupOwner, 'list_tasks', listTasksBody({
-        p_scope: 'all', p_preset: 'pending_my_approval',
+      const pending = await rpc<number>(actors.teamLead, 'get_my_pending_approval_count');
+      const dashboard = await rpc<{ pending_my_approval: number }>(actors.teamLead, 'get_dashboard_task_counts');
+      const list = await rpc<{ items: Array<{ id: string }>; total: number }>(actors.teamLead, 'list_tasks', listTasksBody({
+        p_scope: 'all', p_preset: 'pending_my_approval', p_project_id: projectId,
       }));
-      expect(pending.data).toBe(1);
-      expect(dashboard.data?.pending_my_approval).toBe(1);
+      const expectedCount = before.data! + 1;
+      expect(pending.data).toBe(expectedCount);
+      expect(dashboard.data?.pending_my_approval).toBe(expectedCount);
       expect(list.data?.total).toBe(1);
       expect(list.data?.items.map(({ id }) => id)).toEqual([task.id]);
 
       const summaries = await rpc<Array<{ id: string; review_count: number }>>(actors.crossGroupOwner, 'get_project_summaries');
       expect(summaries.data?.find(({ id }) => id === projectId)?.review_count).toBe(1);
 
-      await actors.crossGroupOwner.page.goto('/#/dashboard');
-      await actors.crossGroupOwner.page.reload();
-      const card = actors.crossGroupOwner.page.getByRole('button', { name: /待我审批/ });
-      await expect(card).toContainText('1');
+      await actors.teamLead.page.goto('/#/dashboard');
+      await actors.teamLead.page.reload();
+      const card = actors.teamLead.page.getByRole('button', { name: /待我审批/ });
+      await expect(card).toContainText(String(expectedCount));
       await card.focus();
       await expect(card).toBeFocused();
       await card.press('Enter');
-      await expect(actors.crossGroupOwner.page).toHaveURL(/#\/tasks\?scope=all&preset=pending_my_approval/);
-      await expect(actors.crossGroupOwner.page.locator(`#task-row-${task.id}`)).toBeVisible();
-      await expect(actors.crossGroupOwner.page.getByText(/共 1 条/)).toBeVisible();
+      await expect(actors.teamLead.page).toHaveURL(/#\/tasks\?scope=all&preset=pending_my_approval/);
+      await expect(actors.teamLead.page.locator(`#task-row-${task.id}`)).toBeVisible();
+      await expect(actors.teamLead.page.getByText(`共 ${expectedCount} 条`, { exact: false })).toBeVisible();
 
       await actors.crossGroupOwner.page.goto('/#/projects');
-      const article = actors.crossGroupOwner.page.locator('article').filter({ hasText: projectName });
+      const article = actors.crossGroupOwner.page.locator('article').filter({
+        has: actors.crossGroupOwner.page.getByRole('button', { name: projectName, exact: true }),
+      });
       const projectMetric = article.getByRole('button', { name: /待审批\s*1/ });
       await projectMetric.focus();
       await expect(projectMetric).toBeFocused();
@@ -561,7 +627,7 @@ async function assertProjectUi(
   await expect(article).toHaveCount(expected.visible ? 1 : 0);
   if (!expected.visible) return;
   await expect(article.getByTitle('编辑')).toHaveCount(expected.edit ? 1 : 0);
-  await expect(article.getByTitle('调整归属与负责人')).toHaveCount(expected.govern ? 1 : 0);
+  await expect(article.getByTitle('更换项目负责人')).toHaveCount(expected.govern ? 1 : 0);
 }
 
 async function expectProjectDescription(admin: HardeningSession, projectId: string, description: string) {

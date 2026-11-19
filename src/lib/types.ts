@@ -48,7 +48,6 @@ export interface Project {
   status: ProjectStatus;
   start_date: string | null;
   end_date: string | null;
-  team_id: string;
   owner_id: string | null;
   requires_testing: boolean;
   test_state: ProjectTestState;
@@ -297,7 +296,7 @@ export interface TestRound {
   concluded_at: string | null;
 }
 
-/** v2.13：项目负责人审批与管理员异常代办的不可变审计记录。 */
+/** 开发任务审批与管理员异常代办的不可变审计记录。 */
 export interface TaskApprovalAudit {
   id: string;
   task_id: string;
