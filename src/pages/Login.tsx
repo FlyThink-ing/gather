@@ -19,6 +19,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+  const signingIn = busy || session !== null;
 
   useEffect(() => {
     if (!loading && session) navigate('/dashboard', { replace: true });
@@ -26,20 +27,18 @@ export default function Login() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (signingIn) return;
     setError('');
     setInfo('');
     setBusy(true);
     try {
       if (mode === 'login') {
         await signIn(email, password);
-        navigate('/dashboard', { replace: true });
       } else {
         const { needsConfirm } = await signUp(email, password, name, position);
         if (needsConfirm) {
           setInfo('注册成功，请前往邮箱完成验证后再登录。');
           setMode('login');
-        } else {
-          navigate('/dashboard', { replace: true });
         }
       }
     } catch (err) {
@@ -121,10 +120,10 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={busy}
+            disabled={signingIn}
             className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
           >
-            {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}
+            {signingIn ? '处理中…' : mode === 'login' ? '登录' : '注册'}
           </button>
         </form>
 

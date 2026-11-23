@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Developer, Role } from '../lib/types';
@@ -17,42 +17,58 @@ interface AuthState {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [role, setRole] = useState<Role>('user');
-  const [developer, setDeveloper] = useState<Developer | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadProfile = useCallback(async (uid: string) => {
-    const [{ data: roleRow }, { data: devRow }] = await Promise.all([
-      supabase.from('user_roles').select('role').eq('user_id', uid).maybeSingle(),
-      supabase.from('developers').select('*').eq('user_id', uid).maybeSingle(),
-    ]);
-    setRole((roleRow?.role as Role) ?? 'user');
-    setDeveloper((devRow as Developer) ?? null);
-  }, []);
+  const [session, setSession] = useState<Session | null>();
+  const [profile, setProfile] = useState<{ userId: string; role: Role; developer: Developer | null } | null>(null);
+  const activeUserId = useRef<string>();
+  const profileRequest = useRef(0);
+  const userId = session?.user?.id;
+  const currentProfile = profile?.userId === userId ? profile : null;
+  const loading = session === undefined || (userId !== undefined && !currentProfile);
 
   const refresh = useCallback(async () => {
-    if (session?.user) await loadProfile(session.user.id);
-  }, [session, loadProfile]);
+    const userId = activeUserId.current;
+    if (!userId) return;
+
+    const request = ++profileRequest.current;
+    let role: Role = 'user';
+    let developer: Developer | null = null;
+    try {
+      const [{ data: roleRow }, { data: devRow }] = await Promise.all([
+        supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle(),
+        supabase.from('developers').select('*').eq('user_id', userId).maybeSingle(),
+      ]);
+      role = (roleRow?.role as Role) ?? 'user';
+      developer = (devRow as Developer) ?? null;
+    } finally {
+      if (request === profileRequest.current) setProfile({ userId, role, developer });
+    }
+  }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session?.user) await loadProfile(data.session.user.id);
-      setLoading(false);
+    let receivedAuthEvent = false;
+    // Supabase 的资料查询会读取会话，必须等认证回调返回后再发起。
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'INITIAL_SESSION' && receivedAuthEvent) return;
+      receivedAuthEvent = true;
+      const nextUserId = nextSession?.user?.id;
+      if (activeUserId.current !== nextUserId) {
+        activeUserId.current = nextUserId;
+        profileRequest.current++;
+        setProfile(null);
+      }
+      setSession(nextSession);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
-      setSession(s);
-      if (s?.user) {
-        await loadProfile(s.user.id);
-      } else {
-        setRole('user');
-        setDeveloper(null);
-      }
-    });
-    return () => sub.subscription.unsubscribe();
-  }, [loadProfile]);
+    return () => {
+      subscription.unsubscribe();
+      activeUserId.current = undefined;
+      profileRequest.current++;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (session) void refresh().catch((error) => console.error('加载用户资料失败', error));
+  }, [session, refresh]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -79,7 +95,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, role, developer, loading, signIn, signUp, signOut, refresh }}
+      value={{
+        session: session ?? null,
+        role: currentProfile?.role ?? 'user',
+        developer: currentProfile?.developer ?? null,
+        loading,
+        signIn,
+        signUp,
+        signOut,
+        refresh,
+      }}
     >
       {children}
     </AuthContext.Provider>

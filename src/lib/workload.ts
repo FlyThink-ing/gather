@@ -6,14 +6,50 @@ const taskDateFormat = new Intl.DateTimeFormat('sv-SE', { dateStyle: 'short', ti
 
 export const taskCalendarDate = (time: string | Date = new Date()): string => taskDateFormat.format(new Date(time));
 
-/** 计划工期（天，含首尾）；日期缺失返回 null */
-export function planDays(start: string | null, due: string | null): number | null {
-  if (!start || !due || due < start) return null;
-  return (Date.parse(due) - Date.parse(start)) / DAY_MS + 1;
+const isoDay = (day: number) => new Date(day).toISOString().slice(0, 10);
+
+export function taskWeekends(start: string, due: string) {
+  const weekends: { date: string; label: string }[][] = [];
+  if (!start || !due || due < start) return weekends;
+
+  const first = Date.parse(start);
+  const last = Date.parse(due);
+  const weekday = new Date(first).getUTCDay();
+  const firstSaturday = first + (weekday === 0 ? -1 : 6 - weekday) * DAY_MS;
+  for (let saturday = firstSaturday; saturday <= last; saturday += 7 * DAY_MS) {
+    const weekend = [];
+    if (saturday >= first) weekend.push({ date: isoDay(saturday), label: '周六' });
+    const sunday = saturday + DAY_MS;
+    if (sunday <= last) weekend.push({ date: isoDay(sunday), label: '周日' });
+    weekends.push(weekend);
+  }
+  return weekends;
 }
 
-export const taskPlanDays = (task: Pick<Task, 'start_date' | 'due_date' | 'planned_work_days'>) =>
-  task.planned_work_days ?? planDays(task.start_date, task.due_date);
+/** 计划工期含首尾。没有值班记录的旧任务沿用自然日。 */
+export function planDays(start: string | null, due: string | null, weekendWorkDates: readonly string[] | null = null): number | null {
+  if (!start || !due || due < start) return null;
+  const calendarDays = (Date.parse(due) - Date.parse(start)) / DAY_MS + 1;
+  if (weekendWorkDates === null) return calendarDays;
+
+  const selected = new Set(weekendWorkDates);
+  const daysOff = taskWeekends(start, due).flat().filter(({ date }) => !selected.has(date)).length;
+  return calendarDays - daysOff;
+}
+
+export const taskPlanDays = (task: Pick<Task, 'start_date' | 'due_date' | 'planned_work_days' | 'weekend_work_dates'>) =>
+  task.planned_work_days ?? planDays(task.start_date, task.due_date, task.weekend_work_dates);
+
+export function taskScheduleExtension(task: Pick<Task, 'start_date' | 'due_date' | 'planned_work_days' | 'weekend_work_dates' | 'original_due_date'>) {
+  const { start_date, due_date, planned_work_days, weekend_work_dates, original_due_date } = task;
+  if (!start_date || !due_date || planned_work_days == null) return null;
+  const originalDueDate = original_due_date ?? (weekend_work_dates == null
+    ? isoDay(Date.parse(start_date) + (planned_work_days - 1) * DAY_MS)
+    : null);
+  if (!originalDueDate) return null;
+  const extensionDays = (Date.parse(due_date) - Date.parse(originalDueDate)) / DAY_MS;
+  return extensionDays > 0 ? { originalDueDate, dueDate: due_date, extensionDays } : null;
+}
 
 /** 项目实际/已运行周期（含首尾）；已完成项目缺失可靠完成时间时不猜测。 */
 export function projectActualCycleDays(
@@ -53,13 +89,17 @@ export function actualDays(segments: WorkDaySegment[], includeOpen = true): numb
   return workDays(segments, includeOpen ? taskCalendarDate() : null).size;
 }
 
-export function resumeTaskDueDate(dueDate: string, plannedDays: number, segments: WorkDaySegment[], resumeDate: string): string {
-  const days = workDays(segments, null);
-  const resumeTime = Date.parse(resumeDate);
-  const remainingDays = plannedDays - days.size;
-  const daysAfterResume = Math.max(0, remainingDays - (days.has(resumeTime) ? 0 : 1));
-  const newDueDate = new Date(resumeTime + daysAfterResume * DAY_MS).toISOString().slice(0, 10);
-  return newDueDate > dueDate ? newDueDate : dueDate;
+export function taskResumeExtension(dueDate: string, plannedDays: number, segments: WorkDaySegment[], resumeDate: string) {
+  const pausedAt = segments.reduce((latest, segment) =>
+    !segment.voided_at && segment.ended_at ? Math.max(latest, Date.parse(segment.ended_at)) : latest, -Infinity);
+  if (!Number.isFinite(pausedAt)) return null;
+  const pauseDate = taskCalendarDate(new Date(pausedAt));
+  if (pauseDate >= resumeDate || pauseDate > dueDate) return null;
+
+  const remainingDays = plannedDays - actualDays(segments, false);
+  const daysAfterResume = Math.max(0, remainingDays - 1);
+  const newDueDate = new Date(Date.parse(resumeDate) + daysAfterResume * DAY_MS).toISOString().slice(0, 10);
+  return newDueDate > dueDate ? { dueDate: newDueDate, pauseDate } : null;
 }
 
 export const isUnfinished = (t: Pick<Task, 'status'>) => t.status !== 'done' && t.status !== 'delayed_done';

@@ -22,7 +22,7 @@ import {
   TIMING_BADGE,
   taskGradient,
 } from '../lib/types';
-import { calcWorkload, taskTimingState, isUnfinished, planDays, actualDays, taskCalendarDate, taskPlanDays } from '../lib/workload';
+import { calcWorkload, taskTimingState, isUnfinished, planDays, actualDays, taskCalendarDate, taskPlanDays, taskScheduleExtension } from '../lib/workload';
 
 const DAY_W = 34; // 每天列宽 px
 const BAR_H = 30; // 任务条行高 px
@@ -138,6 +138,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
   };
 
   const totalW = days.length * DAY_W;
+  const hoveredExtension = hover ? taskScheduleExtension(hover.task) : null;
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -417,6 +418,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
                 </span>
               )}
             </div>
+            {hoveredExtension && <div>原计划截止 {hoveredExtension.originalDueDate} · 自动顺延 {hoveredExtension.extensionDays} 天</div>}
             {(segsByTask.get(hover.task.id) ?? []).length > 0 && (
               <div className="flex gap-1">
                 <span className="shrink-0">实际：</span>

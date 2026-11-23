@@ -11,10 +11,16 @@
  */
 
 import type { WorkSegment } from './types';
-import { actualDays, isTaskOverdue, planDays, resumeTaskDueDate, taskCalendarDate } from './workload';
+import { actualDays, isTaskOverdue, planDays, taskCalendarDate, taskResumeExtension, taskScheduleExtension, taskWeekends } from './workload';
 
 type Row = Record<string, any>;
 type Store = Record<string, Row[]>;
+
+function normalizeWeekendWorkDates(start: string, due: string, dates: string[] | null): string[] | null {
+  if (dates === null) return null;
+  const selected = new Set(dates);
+  return taskWeekends(start, due).flat().filter(({ date }) => selected.has(date)).map(({ date }) => date);
+}
 
 const STORE_KEY = 'gather-demo-store-v12';
 const SESSION_KEY = 'gather-demo-session-v1';
@@ -37,6 +43,8 @@ const TABLE_DEFAULTS: Record<string, Row> = {
     start_date: null,
     due_date: null,
     planned_work_days: null,
+    weekend_work_dates: null,
+    original_due_date: null,
     submitted_at: null,
     completed_at: null,
     approved_by_role: null,
@@ -70,6 +78,7 @@ const TABLE_DEFAULTS: Record<string, Row> = {
   developers: { user_id: null, position: null, is_active: true },
   teams: { leader_id: null, is_test_team: false },
   task_comments: {},
+  task_pause_periods: { resumed_at: null },
   task_work_segments: {
     developer_id: null, ended_at: null, entry_source: 'automatic', note: null, created_by: null,
     voided_at: null, voided_by: null, void_reason: null, updated_at: null,
@@ -428,6 +437,7 @@ function seed(): Store {
     tasks,
     task_comments: [],
     task_work_segments,
+    task_pause_periods: initialPausePeriods(tasks, task_work_segments),
     test_rounds,
     test_plans,
     test_cycles,
@@ -458,11 +468,24 @@ function seed(): Store {
   };
 }
 
+function initialPausePeriods(tasks: Row[], segments: Row[]): Row[] {
+  const pausedTasks = new Set(tasks.filter((task) =>
+    task.status === 'paused' && task.task_type === 'dev' && task.work_source === 'development').map((task) => task.id));
+  const lastEnded = new Map<string, string>();
+  for (const segment of segments) {
+    if (!pausedTasks.has(segment.task_id) || !segment.ended_at || segment.voided_at || segment.entry_source === 'manual') continue;
+    const previous = lastEnded.get(segment.task_id);
+    if (!previous || Date.parse(segment.ended_at) > Date.parse(previous)) lastEnded.set(segment.task_id, segment.ended_at);
+  }
+  return [...lastEnded].map(([taskId, pausedAt]) => ({ id: uuid(), task_id: taskId, paused_at: pausedAt, resumed_at: null }));
+}
+
 function loadStore(): Store {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s: Store = JSON.parse(raw);
+      s.task_pause_periods ??= initialPausePeriods(s.tasks ?? [], s.task_work_segments ?? []);
       // 原地修复历史坏数据：早期 insert 未套用列默认值，导致新建任务缺 status 等字段
       for (const [table, defaults] of Object.entries(TABLE_DEFAULTS)) {
         s[table] ??= [];
@@ -669,10 +692,21 @@ export function createDemoClient() {
 
     const transitionAt = now();
     if (old.task_type === 'dev' && old.work_source === 'development' && old.status === 'paused' && next === 'in_progress') {
-      const plannedDays = old.planned_work_days ?? planDays(old.start_date, old.due_date);
-      if (plannedDays != null) {
+      const plannedDays = old.planned_work_days ?? planDays(old.start_date, old.due_date, old.weekend_work_dates);
+      const resumeDate = taskCalendarDate(transitionAt);
+      const extension = plannedDays == null ? null : taskResumeExtension(old.due_date, plannedDays, taskSegments(old.id), resumeDate);
+      if (extension) {
+        p.original_due_date = old.original_due_date ?? (old.planned_work_days != null && old.weekend_work_dates == null
+          ? taskScheduleExtension({ start_date: old.start_date, due_date: old.due_date, planned_work_days: old.planned_work_days })?.originalDueDate ?? old.due_date
+          : old.due_date);
         p.planned_work_days = plannedDays;
-        p.due_date = resumeTaskDueDate(old.due_date, plannedDays, taskSegments(old.id), taskCalendarDate(transitionAt));
+        p.due_date = extension.dueDate;
+        store.task_management_audits.push({
+          id: uuid(), task_id: old.id, action: 'auto_reschedule', actor_id: DEMO_DEV_ID, created_at: transitionAt,
+          before_data: { due_date: old.due_date },
+          after_data: { due_date: extension.dueDate, planned_work_days: plannedDays, paused_on: extension.pauseDate, resumed_on: resumeDate },
+          reason: '挂起后跨天恢复，按剩余计划工期自动顺延',
+        });
       }
     }
 
@@ -697,6 +731,16 @@ export function createDemoClient() {
       }
     }
 
+    if (old.task_type === 'dev' && old.work_source === 'development') {
+      if (old.status === 'in_progress' && finalNext === 'paused') {
+        store.task_pause_periods.unshift({ id: uuid(), task_id: old.id, paused_at: transitionAt, resumed_at: null });
+      }
+      if (old.status === 'paused' && finalNext === 'in_progress') {
+        const period = store.task_pause_periods.find((item) => item.task_id === old.id && !item.resumed_at);
+        if (period) period.resumed_at = Date.parse(transitionAt) >= Date.parse(period.paused_at) ? transitionAt : period.paused_at;
+      }
+    }
+
     if (old.status !== 'review' && p.status === 'review') {
       for (const leaderId of taskGroupLeaders(old.developer_id)) {
         notify(leaderId, 'task_submitted', { task_id: old.id, title: old.title });
@@ -709,7 +753,7 @@ export function createDemoClient() {
     private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
     private payload: Row | null = null;
     private filters: ((row: Row) => boolean)[] = [];
-    private orderBy: { col: string; asc: boolean } | null = null;
+    private orderBy: { col: string; asc: boolean }[] = [];
     private limitN: number | null = null;
     private offset = 0;
     private single = false;
@@ -723,7 +767,7 @@ export function createDemoClient() {
     eq(col: string, val: any) { this.filters.push((row) => row[col] === val); return this; }
     in(col: string, values: unknown[]) { this.filters.push((row) => values.includes(row[col])); return this; }
     order(col: string, opts?: { ascending?: boolean }) {
-      this.orderBy = { col, asc: opts?.ascending !== false };
+      this.orderBy.push({ col, asc: opts?.ascending !== false });
       return this;
     }
     limit(n: number) { this.limitN = n; return this; }
@@ -737,13 +781,19 @@ export function createDemoClient() {
 
       if (this.op === 'select') {
         let out = matched().slice();
-        if (this.orderBy) {
-          const { col, asc } = this.orderBy;
-          out.sort((a, b) => (a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0) * (asc ? 1 : -1));
+        if (this.orderBy.length) {
+          out.sort((a, b) => {
+            for (const { col, asc } of this.orderBy) {
+              const comparison = a[col] < b[col] ? -1 : a[col] > b[col] ? 1 : 0;
+              if (comparison !== 0) return asc ? comparison : -comparison;
+            }
+            return 0;
+          });
         }
         if (this.limitN != null) out = out.slice(this.offset, this.offset + this.limitN);
         return { data: this.single ? (out[0] ?? null) : out, error: null };
       }
+      if (this.table === 'task_pause_periods') return { data: null, error: { message: '挂起记录由任务状态自动维护' } };
       if (this.op === 'insert') {
         // 模拟数据库列默认值（真实库由 DEFAULT 子句处理）
         const defaults: Row = this.table === 'tasks' ? { ...TABLE_DEFAULTS.tasks, created_by: DEMO_DEV_ID } : TABLE_DEFAULTS[this.table] ?? {};
@@ -757,6 +807,8 @@ export function createDemoClient() {
         }
         if (this.table === 'tasks') {
           row.planned_work_days = null;
+          row.original_due_date = null;
+          row.weekend_work_dates = normalizeWeekendWorkDates(row.start_date, row.due_date, row.weekend_work_dates);
           if (row.created_by !== DEMO_DEV_ID) return { data: null, error: { message: '任务创建人须为当前账号' } };
           const protectedLinks = [
             row.linked_task_id, row.test_result, row.test_note, row.test_plan_id,
@@ -829,6 +881,10 @@ export function createDemoClient() {
         return { data: null, error: null };
       }
       // delete
+      if (this.table === 'tasks') {
+        const taskIds = new Set(matched().map((task) => task.id));
+        store.task_pause_periods = store.task_pause_periods.filter((period) => !taskIds.has(period.task_id));
+      }
       store[this.table] = rows.filter((row) => !matchesFilters(row));
       save();
       return { data: null, error: null };
@@ -866,6 +922,9 @@ export function createDemoClient() {
     async getSession() { return { data: { session }, error: null }; },
     onAuthStateChange(cb: Listener) {
       listeners.push(cb);
+      queueMicrotask(() => {
+        if (listeners.includes(cb)) cb('INITIAL_SESSION', session);
+      });
       return {
         data: {
           subscription: {
@@ -1935,10 +1994,17 @@ export function createDemoClient() {
       if (['review', 'testing', 'done', 'delayed_done'].includes(task.status)) return err('锁定或终态任务不能改派/调计划');
       if (params.p_due_date < params.p_start_date) return err('截止日期不能早于开始日期');
       const before = { ...task };
-      if (task.start_date !== params.p_start_date || task.due_date !== params.p_due_date) task.planned_work_days = null;
+      const weekendWorkDates = normalizeWeekendWorkDates(params.p_start_date, params.p_due_date,
+        params.p_weekend_work_dates ?? task.weekend_work_dates ?? null);
+      if (task.start_date !== params.p_start_date || task.due_date !== params.p_due_date
+        || task.weekend_work_dates?.join() !== weekendWorkDates?.join()) {
+        task.planned_work_days = null;
+        task.original_due_date = null;
+      }
       Object.assign(task, {
         developer_id: params.p_developer_id ?? null, team_id: params.p_team_id ?? task.team_id,
-        start_date: params.p_start_date, due_date: params.p_due_date, priority: params.p_priority, updated_at: now(),
+        start_date: params.p_start_date, due_date: params.p_due_date, weekend_work_dates: weekendWorkDates,
+        priority: params.p_priority, updated_at: now(),
       });
       store.task_management_audits.push({ id: uuid(), task_id: task.id, action: name === 'lead_manage_task' ? 'lead_manage' : 'admin_manage', before_data: before, after_data: { ...task }, actor_id: DEMO_DEV_ID, reason, created_at: now() });
       save(); return { data: task, error: null };
@@ -1968,10 +2034,11 @@ export function createDemoClient() {
     }
 
     if (name === 'get_dashboard_task_counts') {
-      const visible = store.tasks;
+      const visible = store.tasks.filter((task) => !params.p_task_type || task.task_type === params.p_task_type);
       return { data: {
         total: visible.length,
         in_progress: visible.filter((task) => task.status === 'in_progress').length,
+        paused: visible.filter((task) => task.status === 'paused').length,
         testing_active: visible.filter((task) => (task.task_type === 'dev' && task.status === 'testing') || (task.task_type === 'test' && !['done', 'delayed_done'].includes(task.status) && !task.test_result)).length,
         pending_my_approval: visible.filter(canApproveTask).length,
         completed: visible.filter((task) => task.status === 'done').length,

@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ListTodo, LoaderCircle, Clock, CheckCircle2, CalendarClock, AlertTriangle, FlaskConical,
+  ListTodo, LoaderCircle, Pause, Clock, CheckCircle2, CalendarClock, AlertTriangle, FlaskConical,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import GanttChart from '../components/GanttChart';
-import { isTaskOverdue } from '../lib/workload';
 import { scopeTasks, defaultScope, type DevTeamLink } from '../lib/scope';
 import { type Task, type Developer, type Project, type Team, type WorkSegment, type DashboardTaskCounts } from '../lib/types';
 
@@ -34,7 +33,7 @@ export default function Dashboard() {
       supabase.from('teams').select('*'),
       supabase.from('developer_teams').select('*'),
       supabase.from('task_work_segments').select('*'),
-      supabase.rpc('get_dashboard_task_counts'),
+      supabase.rpc('get_dashboard_task_counts', { p_task_type: testingFeaturesEnabled ? null : 'dev' }),
     ]);
     setTasks((t.data as Task[]) ?? []);
     setDevelopers((d.data as Developer[]) ?? []);
@@ -55,13 +54,14 @@ export default function Dashboard() {
   );
 
   const cards = [
-    { label: '总任务', value: counts?.total ?? 0, icon: <ListTodo size={18} />, cls: 'bg-slate-500/15 text-slate-700 dark:text-slate-300', preset: '' },
-    { label: '进行中', value: counts?.in_progress ?? 0, icon: <LoaderCircle size={18} />, cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400', preset: 'in_progress' },
-    ...(testingFeaturesEnabled ? [{ label: '测试中', value: counts?.testing_active ?? 0, icon: <FlaskConical size={18} />, cls: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400', preset: 'testing_active' }] : []),
-    { label: '待我审批', value: counts?.pending_my_approval ?? 0, icon: <Clock size={18} />, cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', preset: 'pending_my_approval' },
-    { label: '已完成', value: counts?.completed ?? 0, icon: <CheckCircle2 size={18} />, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', preset: 'completed' },
-    { label: '延期完成', value: counts?.delayed_done ?? 0, icon: <CalendarClock size={18} />, cls: 'bg-orange-500/15 text-orange-600 dark:text-orange-400', preset: 'delayed_done' },
-    { label: '逾期', value: counts?.overdue ?? 0, icon: <AlertTriangle size={18} />, cls: 'bg-orange-500/15 text-orange-600 dark:text-orange-400', preset: 'overdue' },
+    { label: '总任务', value: counts?.total ?? 0, icon: <ListTodo size={18} />, cls: 'bg-slate-500/15 text-slate-700 dark:text-slate-300', filter: '' },
+    { label: '进行中', value: counts?.in_progress ?? 0, icon: <LoaderCircle size={18} />, cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400', filter: '&preset=in_progress' },
+    { label: '已挂起', value: counts?.paused ?? 0, icon: <Pause size={18} />, cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300', filter: '&status=paused' },
+    ...(testingFeaturesEnabled ? [{ label: '测试中', value: counts?.testing_active ?? 0, icon: <FlaskConical size={18} />, cls: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400', filter: '&preset=testing_active' }] : []),
+    { label: '待我审批', value: counts?.pending_my_approval ?? 0, icon: <Clock size={18} />, cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', filter: '&preset=pending_my_approval' },
+    { label: '已完成', value: counts?.completed ?? 0, icon: <CheckCircle2 size={18} />, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', filter: '&preset=completed' },
+    { label: '延期完成', value: counts?.delayed_done ?? 0, icon: <CalendarClock size={18} />, cls: 'bg-orange-500/15 text-orange-600 dark:text-orange-400', filter: '&preset=delayed_done' },
+    { label: '逾期', value: counts?.overdue ?? 0, icon: <AlertTriangle size={18} />, cls: 'bg-orange-500/15 text-orange-600 dark:text-orange-400', filter: '&preset=overdue' },
   ];
 
   // 甘特图组件根据“显示已完成”和筛选项决定人员行；这里提供所有有范围内任务的人员
@@ -79,9 +79,9 @@ export default function Dashboard() {
       <PageHeader title="项目概览" />
 
       {/* 统计卡片 */}
-      <div className={`grid grid-cols-2 gap-4 md:grid-cols-4 ${testingFeaturesEnabled ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
+      <div className={`grid grid-cols-2 gap-4 md:grid-cols-4 ${testingFeaturesEnabled ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
         {cards.map((c) => (
-          <button key={c.label} type="button" onClick={() => navigate(`/tasks?scope=all${c.preset ? `&preset=${c.preset}` : ''}`)} className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-400 hover:bg-brand-500/5 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-slate-800 dark:bg-slate-900">
+          <button key={c.label} type="button" onClick={() => navigate(`/tasks?scope=all${c.filter}`)} className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-400 hover:bg-brand-500/5 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between">
               <span className="text-sm text-slate-500 dark:text-slate-400">{c.label}</span>
               <span className={`rounded-lg p-1.5 ${c.cls}`}>{c.icon}</span>

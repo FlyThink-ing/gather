@@ -124,10 +124,28 @@ test('UAT 任务开始、提交、小组组长批准/驳回及项目负责人越
       const started = await patchStatus(assignee, task.id, { status: 'in_progress' });
       expect(started.status).toBe(200);
       expect(started.data?.[0]?.status).toBe('in_progress');
+      if (task.id === approveTask.id) {
+        for (let cycle = 0; cycle < 2; cycle += 1) {
+          const paused = await patchStatus(assignee, task.id, { status: 'paused' });
+          expect(paused.data?.[0]?.status).toBe('paused');
+          const resumed = await patchStatus(assignee, task.id, { status: 'in_progress' });
+          expect(resumed.data?.[0]?.status).toBe('in_progress');
+        }
+      }
       const submitted = await patchStatus(assignee, task.id, { status: 'review' });
       expect(submitted.status).toBe(200);
       expect(submitted.data?.[0]?.status).toBe('review');
     }
+
+    const pauseHistory = await groupLead.rest.request<Array<{ paused_at: string; resumed_at: string }>>(
+      groupLead.page, `task_pause_periods?select=paused_at,resumed_at&task_id=eq.${approveTask.id}&order=paused_at.asc`,
+    );
+    expect(pauseHistory.status).toBe(200);
+    expect(pauseHistory.data).toHaveLength(2);
+    const [firstPause, secondPause] = pauseHistory.data!;
+    expect(Date.parse(firstPause.resumed_at)).toBeGreaterThanOrEqual(Date.parse(firstPause.paused_at));
+    expect(Date.parse(secondPause.resumed_at)).toBeGreaterThanOrEqual(Date.parse(secondPause.paused_at));
+    expect(Date.parse(secondPause.paused_at)).toBeGreaterThanOrEqual(Date.parse(firstPause.resumed_at));
 
     const ownerTasks = await owner.rest.request<Array<{ id: string }>>(owner.page,
       `tasks?select=id&project_id=eq.${projectId}&status=eq.review`);

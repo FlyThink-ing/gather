@@ -9,6 +9,7 @@ import Modal, { inputCls, labelCls, btnPrimary, btnGhost } from '../components/M
 import { AlertDialog } from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import DatePicker from '../components/DatePicker';
+import TaskPauseHistory from '../components/TaskPauseHistory';
 import {
   type Task,
   type TaskListItem,
@@ -30,7 +31,7 @@ import {
   TEST_RESULT_BADGE,
   TIMING_BADGE,
 } from '../lib/types';
-import { planDays, isTaskOverdue, taskCalendarDate, taskPlanDays, taskTimingState } from '../lib/workload';
+import { isTaskOverdue, taskCalendarDate, taskPlanDays, taskScheduleExtension, taskTimingState, taskWeekends } from '../lib/workload';
 import { defaultScope, developerTeamIds, SCOPE_LABEL, taskTeamIds, type DevTeamLink, type ScopeKey } from '../lib/scope';
 
 const formatDateTime = (value: string | null) =>
@@ -41,14 +42,18 @@ const TASK_TITLE_MAX = 120;
 const TASK_DESCRIPTION_MAX = 5000;
 const TASK_NOTE_MAX = 2000;
 
-interface TaskForm {
+interface TaskSchedule {
+  start_date: string;
+  due_date: string;
+  weekend_work_dates: string[] | null;
+}
+
+interface TaskForm extends TaskSchedule {
   title: string;
   description: string;
   project_id: string;
   developer_id: string;
   priority: Priority;
-  start_date: string;
-  due_date: string;
 }
 
 type TaskCreationProject = Pick<Project, 'id' | 'name'>;
@@ -61,7 +66,16 @@ const emptyForm: TaskForm = {
   priority: 'medium',
   start_date: '',
   due_date: '',
+  weekend_work_dates: [],
 };
+
+function changeScheduleDate<T extends TaskSchedule>(schedule: T, field: 'start_date' | 'due_date', value: string): T {
+  const next = { ...schedule, [field]: value };
+  if (value === schedule[field]) return next;
+  next.weekend_work_dates = (schedule.weekend_work_dates ?? []).filter((date) =>
+    (!next.start_date || date >= next.start_date) && (!next.due_date || date <= next.due_date));
+  return next;
+}
 
 export default function Tasks() {
   const { role, developer } = useAuth();
@@ -172,7 +186,9 @@ export default function Tasks() {
   // 挂起确认
   const [confirmPause, setConfirmPause] = useState<Task | null>(null);
   const [managing, setManaging] = useState<Task | null>(null);
-  const [manageForm, setManageForm] = useState({ developer_id: '', start_date: '', due_date: '', priority: 'medium' as Priority, reason: '' });
+  const [manageForm, setManageForm] = useState<TaskSchedule & { developer_id: string; priority: Priority; reason: string }>({
+    developer_id: '', start_date: '', due_date: '', weekend_work_dates: null, priority: 'medium', reason: '',
+  });
   const [manageErr, setManageErr] = useState('');
   const [adminAction, setAdminAction] = useState<Task | null>(null);
   const [adminActionReason, setAdminActionReason] = useState('');
@@ -331,6 +347,7 @@ export default function Tasks() {
       priority: t.priority,
       start_date: t.start_date ?? '',
       due_date: t.due_date ?? '',
+      weekend_work_dates: t.weekend_work_dates ?? null,
     });
     setFormErr('');
     setEditing(t);
@@ -357,6 +374,7 @@ export default function Tasks() {
         priority: form.priority,
         start_date: form.start_date,
         due_date: form.due_date,
+        weekend_work_dates: form.weekend_work_dates,
         created_by: developer?.id ?? null,
       });
     } else {
@@ -394,16 +412,30 @@ export default function Tasks() {
   const openManage = (t: Task) => {
     setManaging(t);
     const today = taskCalendarDate();
-    setManageForm({ developer_id: t.developer_id ?? '', start_date: t.start_date ?? today, due_date: t.due_date ?? today, priority: t.priority, reason: '' });
+    setManageForm({
+      developer_id: t.developer_id ?? '', start_date: t.start_date ?? today, due_date: t.due_date ?? today,
+      weekend_work_dates: t.weekend_work_dates ?? null, priority: t.priority, reason: '',
+    });
     setManageErr('');
   };
+  const managementScheduleChanged = managing != null && (
+    manageForm.start_date !== managing.start_date || manageForm.due_date !== managing.due_date
+    || manageForm.weekend_work_dates?.join() !== managing.weekend_work_dates?.join()
+  );
   const saveManage = async () => {
     if (!managing || !manageForm.reason.trim()) return setManageErr('请填写管理原因。');
+    if (!manageForm.start_date || !manageForm.due_date) return setManageErr('请选择开始日期和截止日期。');
     if (manageForm.due_date < manageForm.start_date) return setManageErr('截止日期不能早于开始日期。');
     setSaving(true); setManageErr('');
+    const rpcParams = {
+      p_task_id: managing.id, p_developer_id: manageForm.developer_id || null,
+      p_start_date: manageForm.start_date, p_due_date: manageForm.due_date,
+      p_priority: manageForm.priority, p_reason: manageForm.reason.trim(),
+      p_weekend_work_dates: managementScheduleChanged ? manageForm.weekend_work_dates : null,
+    };
     const { error } = isAdmin
-      ? await supabase.rpc('admin_manage_task', { p_task_id: managing.id, p_developer_id: manageForm.developer_id || null, p_team_id: managing.team_id, p_start_date: manageForm.start_date, p_due_date: manageForm.due_date, p_priority: manageForm.priority, p_reason: manageForm.reason.trim() })
-      : await supabase.rpc('lead_manage_task', { p_task_id: managing.id, p_developer_id: manageForm.developer_id || null, p_start_date: manageForm.start_date, p_due_date: manageForm.due_date, p_priority: manageForm.priority, p_reason: manageForm.reason.trim() });
+      ? await supabase.rpc('admin_manage_task', { ...rpcParams, p_team_id: managing.team_id })
+      : await supabase.rpc('lead_manage_task', rpcParams);
     setSaving(false);
     if (error) return setManageErr(error.message);
     setManaging(null); await load();
@@ -642,8 +674,9 @@ export default function Tasks() {
             {!loading && paged.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-500">暂无任务</td></tr>
             )}
-            {paged.map((t) => (
-              <tr
+            {paged.map((t) => {
+              const extension = taskScheduleExtension(t);
+              return <tr
                 key={t.id}
                 id={`task-row-${t.id}`}
                 className={`border-b border-slate-200 dark:border-slate-800/60 transition-colors ${
@@ -713,6 +746,11 @@ export default function Tasks() {
                 </td>
                 <td className="overflow-hidden px-4 py-3 text-slate-500 dark:text-slate-400">
                   <div className="truncate whitespace-nowrap">{t.due_date ?? '-'}</div>
+                  {extension && (
+                    <div className="mt-0.5 whitespace-nowrap text-xs text-violet-700 dark:text-violet-300" title={`原计划截止 ${extension.originalDueDate}`}>
+                      自动顺延 {extension.extensionDays} 天
+                    </div>
+                  )}
                   {taskTimingState(t) && (
                     <span className={`mt-1.5 inline-flex max-w-full truncate whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${TIMING_BADGE}`}>
                       {taskTimingState(t) === 'overdue' ? '已逾期' : '逾期完成'}
@@ -785,8 +823,8 @@ export default function Tasks() {
                     )}
                   </div>
                 </td>
-              </tr>
-            ))}
+              </tr>;
+            })}
           </tbody>
         </table>
 
@@ -861,9 +899,14 @@ export default function Tasks() {
 
       <Modal title={isAdmin ? '管理员异常调整任务' : '本组任务管理'} open={managing !== null} onClose={() => setManaging(null)}>
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">该入口只能改派负责人、计划日期和优先级，不会代替负责人执行任务；所有变更均写入审计。</p>
+          <p className="text-sm text-slate-500">可调整负责人、计划日期、周末值班和优先级。所有变更均写入审计。</p>
           <div><label className={labelCls}>负责人</label><Select value={manageForm.developer_id} onChange={(developer_id) => setManageForm({ ...manageForm, developer_id })} options={[{ value: '', label: '暂不指定' }, ...managementDeveloperOptions]} /></div>
-          <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>开始日期</label><DatePicker value={manageForm.start_date} onChange={(start_date) => setManageForm({ ...manageForm, start_date })} /></div><div><label className={labelCls}>截止日期</label><DatePicker value={manageForm.due_date} onChange={(due_date) => setManageForm({ ...manageForm, due_date })} /></div></div>
+          <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>开始日期</label><DatePicker value={manageForm.start_date} onChange={(date) => setManageForm((current) => changeScheduleDate(current, 'start_date', date))} /></div><div><label className={labelCls}>截止日期</label><DatePicker value={manageForm.due_date} onChange={(date) => setManageForm((current) => changeScheduleDate(current, 'due_date', date))} /></div></div>
+          <TaskSchedulePreview
+            schedule={manageForm}
+            plannedWorkDays={managementScheduleChanged ? null : managing?.planned_work_days}
+            onWeekendChange={(dates) => setManageForm((current) => ({ ...current, weekend_work_dates: dates }))}
+          />
           <div><label className={labelCls}>优先级</label><Select value={manageForm.priority} onChange={(priority) => setManageForm({ ...manageForm, priority: priority as Priority })} options={priorityOptions} /></div>
           <div><label className={labelCls}>调整原因 <span className="text-red-500">*</span></label><textarea className={`${inputCls} h-20 resize-none`} value={manageForm.reason} onChange={(event) => setManageForm({ ...manageForm, reason: event.target.value })} /></div>
           {manageErr && <div className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700">{manageErr}</div>}
@@ -909,6 +952,7 @@ export default function Tasks() {
                       ? '开发任务提测时间'
                       : testingFeaturesEnabled ? '最近一次提交完成时间' : '任务提交时间'}
                 </div>
+                {confirmApprove.due_date && <div className="mt-2 text-xs">本次按当前截止日期 {confirmApprove.due_date} 判定是否按时。</div>}
               </div>
             </div>
             <TaskDetail
@@ -1003,22 +1047,21 @@ export default function Tasks() {
               <label className={labelCls}>开始日期 <span className="text-red-400">*</span></label>
               <DatePicker
                 value={form.start_date}
-                onChange={(v) => setForm({ ...form, start_date: v })}
+                onChange={(date) => setForm((current) => changeScheduleDate(current, 'start_date', date))}
               />
             </div>
             <div>
               <label className={labelCls}>截止日期 <span className="text-red-400">*</span></label>
               <DatePicker
                 value={form.due_date}
-                onChange={(v) => setForm({ ...form, due_date: v })}
+                onChange={(date) => setForm((current) => changeScheduleDate(current, 'due_date', date))}
               />
             </div>
           </div>
-          {planDays(form.start_date || null, form.due_date || null) != null && (
-            <p className="-mt-2 text-xs text-slate-500">
-              计划工期：{planDays(form.start_date || null, form.due_date || null)} 天
-            </p>
-          )}
+          <TaskSchedulePreview
+            schedule={form}
+            onWeekendChange={(dates) => setForm((current) => ({ ...current, weekend_work_dates: dates }))}
+          />
             </>
           ) : (
             <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
@@ -1067,6 +1110,8 @@ export default function Tasks() {
               ? `提交后进入“待审核”，由任务负责人所属小组的组长审批。${approvalLeaderNames(confirmSubmit) ? `审批人：${approvalLeaderNames(confirmSubmit)}。` : '目前暂无可审批的组长。'}`
               : '该任务无项目归属，确认后将直接完成并锁定。'}
           </p>
+          {confirmSubmit && <TaskScheduleChange extension={taskScheduleExtension(confirmSubmit)} />}
+          {confirmSubmit && <TaskPauseHistory key={confirmSubmit.id} taskId={confirmSubmit.id} />}
           <div className="flex justify-end gap-3">
             <button className={btnGhost} onClick={() => setConfirmSubmit(null)}>取消</button>
             <button
@@ -1095,7 +1140,7 @@ export default function Tasks() {
           <ul className="space-y-1.5 rounded-lg bg-violet-500/10 px-3 py-2.5 text-xs text-violet-700 dark:text-violet-300">
             <li>· 挂起用于任务被打断的场景（如紧急任务插入），当前工时段将立即结束；</li>
             <li>· 挂起期间不计实际工时，也不计逾期；</li>
-            <li>· 点击「继续」会开启新的工时段，并按剩余计划天数自动顺延截止日期。</li>
+            <li>· 点击「继续」会开启新的工时段。截止日期当天或之前挂起，跨天恢复时才会按剩余工期顺延。</li>
           </ul>
           <div className="flex justify-end gap-3">
             <button className={btnGhost} onClick={() => setConfirmPause(null)}>取消</button>
@@ -1121,9 +1166,11 @@ export default function Tasks() {
         <div className="space-y-4">
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {noteFor?.mode === 'delay'
-              ? `任务「${noteFor?.task.title}」已超过截止日期，完成前需说明延期原因。${noteFor?.task && requiresProjectApproval(noteFor.task) ? '提交后由任务负责人所属小组的组长审批。' : '确认后直接标记为延期完成。'}`
+              ? `任务「${noteFor.task.title}」已超过当前截止日期 ${noteFor.task.due_date}，完成前需说明延期原因。${requiresProjectApproval(noteFor.task) ? '提交后由任务负责人所属小组的组长审批。' : '确认后直接标记为延期完成。'}`
               : `审批驳回后任务「${noteFor?.task.title}」将退回「进行中」，负责人可修改后重新提交。`}
           </p>
+          {noteFor?.mode === 'delay' && <TaskScheduleChange extension={taskScheduleExtension(noteFor.task)} />}
+          {noteFor?.mode === 'delay' && <TaskPauseHistory key={noteFor.task.id} taskId={noteFor.task.id} />}
           <textarea
             className={`${inputCls} h-24 resize-none`}
             value={noteText}
@@ -1176,6 +1223,63 @@ function SourceChip({ label, onClear }: { label: string; onClear?: () => void })
   );
 }
 
+function TaskSchedulePreview({ schedule, plannedWorkDays, onWeekendChange }: {
+  schedule: TaskSchedule;
+  plannedWorkDays?: number | null;
+  onWeekendChange: (dates: string[]) => void;
+}) {
+  const { start_date, due_date, weekend_work_dates } = schedule;
+  const plannedDays = taskPlanDays({ ...schedule, planned_work_days: plannedWorkDays });
+  if (plannedDays === null) return null;
+
+  const weekends = weekend_work_dates === null ? [] : taskWeekends(start_date, due_date);
+  const selected = new Set(weekend_work_dates);
+  const toggleDate = (date: string, checked: boolean) => {
+    if (checked) selected.add(date);
+    else selected.delete(date);
+    onWeekendChange([...selected].sort());
+  };
+
+  return (
+    <div className="space-y-2">
+      {weekends.length > 0 && (
+        <fieldset className="min-w-0 rounded-lg border border-slate-200 px-3 pb-2 dark:border-slate-700">
+          <legend className="px-1 text-sm font-medium">周末值班</legend>
+          <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">勾选值班日期，每勾选一天，计划工期增加一天。</p>
+          <div className="max-h-36 divide-y divide-slate-200 overflow-y-auto overscroll-contain dark:divide-slate-700">
+            {weekends.map((weekend) => (
+              <div key={weekend[0].date} className="grid grid-cols-1 gap-x-3 py-1.5 sm:grid-cols-2">
+                {weekend.map(({ date, label }) => (
+                  <label key={date} className="flex cursor-pointer items-center gap-2 py-1 text-sm">
+                    <input type="checkbox" className="h-4 w-4 shrink-0 accent-brand-600" checked={selected.has(date)}
+                      onChange={(event) => toggleDate(date, event.target.checked)} />
+                    <span>{date} {label}</span>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      <p aria-live="polite" className="text-xs text-slate-500 dark:text-slate-400">计划工期：{plannedDays} 天</p>
+    </div>
+  );
+}
+
+function TaskScheduleChange({ extension }: { extension: ReturnType<typeof taskScheduleExtension> }) {
+  if (!extension) return null;
+
+  return (
+    <section className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm dark:border-violet-900 dark:bg-violet-950/20">
+      <h4 className="font-medium text-violet-800 dark:text-violet-200">挂起恢复后自动顺延 {extension.extensionDays} 天</h4>
+      <dl className="mt-2 grid grid-cols-2 gap-3 text-slate-700 dark:text-slate-300">
+        <div><dt className="text-xs text-slate-500 dark:text-slate-400">原计划截止日期</dt><dd>{extension.originalDueDate}</dd></div>
+        <div><dt className="text-xs text-slate-500 dark:text-slate-400">当前截止日期</dt><dd className="font-semibold">{extension.dueDate}</dd></div>
+      </dl>
+    </section>
+  );
+}
+
 function TaskDetail({
   task,
   tasks,
@@ -1207,6 +1311,7 @@ function TaskDetail({
   const owner = developers.find((item) => item.id === task.developer_id);
   const currentRound = testRounds.find((item) => item.test_task_id === task.id);
   const plannedDays = taskPlanDays(task);
+  const extension = taskScheduleExtension(task);
 
   const resultBadge = (result: Task['test_result']) => {
     if (!result) return <span className="text-slate-500">尚未提交结论</span>;
@@ -1261,13 +1366,17 @@ function TaskDetail({
                 : '任务负责人暂无可审批的组长'}
         />
         <DetailItem label="开始日期" value={task.start_date ?? '-'} />
-        <DetailItem label="截止日期" value={task.due_date ?? '-'} />
+        {!extension && <DetailItem label="截止日期" value={task.due_date ?? '-'} />}
+        {!!task.weekend_work_dates?.length && <DetailItem label="周末值班" value={task.weekend_work_dates.join('、')} />}
         <DetailItem label="完成日期" value={task.completed_at ? taskCalendarDate(task.completed_at) : '-'} />
         <DetailItem
           label="工期"
           value={`${plannedDays != null ? `计划 ${plannedDays} 天` : '计划 -'}${actualDayCount > 0 ? ` · 实际 ${actualDayCount} 天` : ''}`}
         />
       </div>
+
+      <TaskScheduleChange extension={extension} />
+      {task.work_source === 'development' && <TaskPauseHistory key={task.id} taskId={task.id} />}
 
       {task.task_type === 'test' && (
         <>

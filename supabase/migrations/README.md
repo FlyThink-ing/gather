@@ -47,6 +47,9 @@
 | 0018 创建项目与组长审批 | 管理员创建项目；任务负责人所属小组的组长审批；新建任务可选全部项目 | 项目 insert 分支、`canApproveTask`、提交通知、待审批列表与计数、`get_task_creation_projects` |
 | 0019 跨组共享项目 | 项目与小组解绑；组长查看本组成员创建或负责的任务；管理员更换项目负责人 | `change_project_owner`、项目候选、提测候选和任务小组筛选 |
 | 0020 任务挂起与恢复 | 挂起不计逾期；恢复时按剩余计划天数顺延截止日期 | `isOverdue`、`applyTaskRules`、任务管理 RPC |
+| 0021 任务恢复顺延条件 | 截止日当天或之前挂起且跨天恢复才允许顺延，记录自动顺延审计；工作台单列挂起 | `applyTaskRules`、`taskResumeExtension`、`get_dashboard_task_counts` |
+| 0022 开发任务挂起记录 | 每次挂起和恢复配对记录，任务可见人员可读取 | `task_pause_periods`、`initialPausePeriods`、`applyTaskRules` |
+| 0023 任务周末值班 | 保存各周末选中的值班日，挂起恢复沿用原计划工期 | `weekend_work_dates`、`reschedule_task_on_resume`、`taskPlanDays` |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

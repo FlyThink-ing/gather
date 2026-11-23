@@ -2,12 +2,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import ts from 'typescript';
-import { actualDays, resumeTaskDueDate, taskCalendarDate, taskTimingState } from '../../../src/lib/workload';
+import { actualDays, taskCalendarDate, taskPlanDays, taskResumeExtension, taskScheduleExtension, taskTimingState, taskWeekends } from '../../../src/lib/workload';
 
 const root = path.resolve(process.env.UAT_CONTRACT_ROOT || process.cwd());
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
 
-test('挂起排除逾期，恢复后只按剩余计划投入天数顺延', () => {
+test('按每个周末的值班日期计算计划工期，保留原定截止日期', () => {
+  const schedule = { start_date: '2026-11-20', due_date: '2026-11-30' };
+  expect(taskWeekends(schedule.start_date, schedule.due_date).map((weekend) => weekend.map(({ date }) => date)))
+    .toEqual([['2026-11-21', '2026-11-22'], ['2026-11-28', '2026-11-29']]);
+  expect(taskPlanDays(schedule)).toBe(11);
+  expect(taskPlanDays({ ...schedule, weekend_work_dates: [] })).toBe(7);
+  expect(taskPlanDays({ ...schedule, weekend_work_dates: ['2026-11-21'] })).toBe(8);
+  const withDuty = { ...schedule, weekend_work_dates: ['2026-11-21', '2026-11-28', '2026-11-29'] };
+  expect(taskPlanDays(withDuty)).toBe(10);
+  expect(taskScheduleExtension(withDuty)).toBeNull();
+
+  const sundayOnly = { start_date: '2026-11-22', due_date: '2026-11-22', weekend_work_dates: [] };
+  expect(taskWeekends(sundayOnly.start_date, sundayOnly.due_date)).toEqual([[{ date: '2026-11-22', label: '周日' }]]);
+  expect(taskPlanDays(sundayOnly)).toBe(0);
+  expect(taskPlanDays({ ...sundayOnly, weekend_work_dates: ['2026-11-22', '2026-11-22', '2026-11-21'] })).toBe(1);
+
+  const resumed = { ...withDuty, due_date: '2026-12-04', original_due_date: schedule.due_date, planned_work_days: 10 };
+  expect(taskPlanDays(resumed)).toBe(10);
+  expect(taskScheduleExtension(resumed)).toEqual({ originalDueDate: '2026-11-30', dueDate: '2026-12-04', extensionDays: 4 });
+});
+
+test('挂起排除逾期，到期前挂起且跨天恢复才顺延', () => {
   const overdueTask = { due_date: '2000-11-18', completed_at: null };
   expect(taskTimingState({ ...overdueTask, status: 'paused' })).toBeNull();
   expect(taskTimingState({ ...overdueTask, status: 'in_progress' })).toBe('overdue');
@@ -17,10 +38,19 @@ test('挂起排除逾期，恢复后只按剩余计划投入天数顺延', () =>
   const resumeDate = taskCalendarDate('2026-11-18T16:00:00Z');
   expect(resumeDate).toBe('2026-11-19');
   expect(actualDays([work, sameDayWork], false)).toBe(1);
-  expect(resumeTaskDueDate('2026-11-18', 1, [work], resumeDate)).toBe('2026-11-19');
-  expect(resumeTaskDueDate('2026-11-20', 3, [work, sameDayWork], resumeDate)).toBe('2026-11-20');
-  expect(resumeTaskDueDate('2026-11-19', 3, [work], '2026-11-18')).toBe('2026-11-20');
-  expect(resumeTaskDueDate('2026-11-26', 1, [work], resumeDate)).toBe('2026-11-26');
+  expect(taskResumeExtension('2026-11-18', 1, [work], resumeDate)).toEqual({ dueDate: '2026-11-19', pauseDate: '2026-11-18' });
+  expect(taskResumeExtension('2026-11-19', 3, [work, sameDayWork], resumeDate)?.dueDate).toBe('2026-11-20');
+  expect(taskResumeExtension('2026-11-19', 3, [work], '2026-11-18')).toBeNull();
+  expect(taskResumeExtension('2026-11-26', 1, [work], resumeDate)).toBeNull();
+
+  const overdueWork = { ...work, started_at: '2026-11-19T16:00:00+08:00', ended_at: '2026-11-19T16:30:00+08:00' };
+  expect(taskResumeExtension('2026-11-18', 1, [overdueWork], '2026-11-19')).toBeNull();
+  expect(taskResumeExtension('2026-11-18', 1, [work, overdueWork], '2026-11-20')).toBeNull();
+  expect(taskResumeExtension('2026-11-18', 1, [], resumeDate)).toBeNull();
+
+  const adjustedTask = { start_date: '2026-11-19', due_date: '2026-11-20', planned_work_days: 1 };
+  expect(taskScheduleExtension(adjustedTask)).toEqual({ originalDueDate: '2026-11-19', dueDate: '2026-11-20', extensionDays: 1 });
+  expect(taskScheduleExtension({ ...adjustedTask, planned_work_days: null })).toBeNull();
 });
 
 test('0012 权限、统计、工时与 UI 跨层合同完整 @hardening-static @hardening', async () => {
@@ -135,6 +165,7 @@ test('UI-NATIVE-STATIC-01 运行时代码不得直接或间接引用原生对话
       if (
         ts.isVariableDeclaration(node)
         && ts.isObjectBindingPattern(node.name)
+        && node.initializer
         && ts.isIdentifier(node.initializer)
         && ['window', 'globalThis', 'self', 'top', 'parent'].includes(node.initializer.text)
       ) {

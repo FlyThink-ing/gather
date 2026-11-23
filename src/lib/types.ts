@@ -208,6 +208,8 @@ export interface Task {
   due_date: string | null;
   /** 自动顺延前的计划投入天数。 */
   planned_work_days?: number | null;
+  weekend_work_dates?: string[] | null;
+  original_due_date?: string | null;
   /** 最近一次提交审核的时间（工作实际完成时刻） */
   submitted_at: string | null;
   /** 完成时间 = 审批通过时生效的 submitted_at */
@@ -232,6 +234,13 @@ export interface TaskPage {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface TaskPausePeriod {
+  id: string;
+  task_id: string;
+  paused_at: string;
+  resumed_at: string | null;
 }
 
 /** 实际工时段：进入 in_progress 开段、离开时闭段（触发器维护，客户端只读） */
@@ -270,6 +279,7 @@ export interface TestWorkEntries {
 export interface DashboardTaskCounts {
   total: number;
   in_progress: number;
+  paused: number;
   testing_active: number;
   pending_my_approval: number;
   completed: number;
@@ -322,7 +332,7 @@ export interface TaskApprovalAudit {
 export interface TaskManagementAudit {
   id: string;
   task_id: string;
-  action: 'lead_manage' | 'admin_manage' | 'admin_execute';
+  action: 'lead_manage' | 'admin_manage' | 'admin_execute' | 'auto_reschedule';
   before_data: Record<string, unknown>;
   after_data: Record<string, unknown>;
   actor_id: string | null;

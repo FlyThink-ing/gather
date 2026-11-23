@@ -114,6 +114,9 @@ npm run build
 0018_project_creation_and_team_task_review.sql
 0019_shared_projects_and_team_task_visibility.sql
 0020_reschedule_paused_tasks.sql
+0021_guard_task_resume_deadlines.sql
+0022_record_task_pause_periods.sql
+0023_task_weekend_duty.sql
 ```
 
 迁移包含表结构、RLS 策略、触发器和 RPC。请勿跳号、重复执行或在生产库中直接修改已执行迁移；详细操作见 [DEPLOY.md](DEPLOY.md)。
