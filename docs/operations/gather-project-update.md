@@ -89,6 +89,8 @@ Write-Output ('主包校验通过：' + $main[0].Name)
 
 发布包包含校验过的 `site/`、仓库完整的 `migrations/` 和迁移脚本。看到 `主包校验通过` 后再打包。ZIP 文件名使用当前 Git 提交和构建时间，实际打包内容来自本次构建和工作区。工作区有尚未提交的发布改动时，将这些改动一起记在发布记录中。打包完成后，记下输出 `FullName` 中的 ZIP 路径。
 
+使用 Windows 的 `tar.exe` 生成 ZIP，使包内目录路径使用 `/`，避免 Linux 上的 `unzip` 报路径分隔符警告。
+
 ```powershell
 $releaseId = 'gather-' + $revision + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 $releaseDir = Join-Path 'C:\deploy' $releaseId
@@ -103,7 +105,9 @@ Copy-Item -LiteralPath '.\supabase\migrations' -Destination $migrationsDir -Recu
 $script = Get-Content -LiteralPath '.\scripts\gather-migrate.sh' -Raw
 [IO.File]::WriteAllText($migrateScript, $script.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
 
-Compress-Archive -LiteralPath $siteDir, $migrationsDir, $migrateScript -DestinationPath $package -ErrorAction Stop
+if (Test-Path -LiteralPath $package) { throw '发布包已存在' }
+tar.exe -a -cf $package -C $releaseDir site migrations gather-migrate.sh
+if ($LASTEXITCODE -ne 0) { throw '发布包打包失败' }
 Get-Item -LiteralPath $package | Select-Object FullName, Length
 ```
 

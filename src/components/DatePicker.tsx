@@ -28,7 +28,7 @@ export default function DatePicker({
   const [view, setView] = useState<Date>(() => (value ? new Date(value) : new Date()));
   const ref = useRef<HTMLDivElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
-  const position = useFloatingLayer(open, ref, calendarRef, 360);
+  const position = useFloatingLayer(open, ref, calendarRef, 360, 256);
 
   useEffect(() => {
     if (open) setView(value ? new Date(value) : new Date());
@@ -112,7 +112,7 @@ export default function DatePicker({
       {open && createPortal(
         <div
           ref={calendarRef}
-          style={position ? { top: position.top, left: position.left, width: Math.max(position.width, 256), maxHeight: position.maxHeight } : { visibility: 'hidden' }}
+          style={position ? { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight } : { visibility: 'hidden' }}
           className="fixed z-[110] overflow-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-3 shadow-xl"
         >
           {/* 月份切换 */}

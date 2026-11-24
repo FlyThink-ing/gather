@@ -29,6 +29,31 @@ const VIEWPORTS = [
   { width: 1024, height: 576, label: '1024x576（125% 等效）' },
 ] as const;
 
+test('工作台的截止日期日历完整显示在窗口内 @hardening @full', async ({ browser }, testInfo) => {
+  const { page, context } = await openHardeningSession(browser, String(testInfo.project.use.baseURL), 'admin');
+  try {
+    await page.setViewportSize({ width: 1920, height: 911 });
+    const toolbar = page.getByRole('heading', { name: '任务甘特图' }).locator('..');
+    const dates = toolbar.getByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ });
+    await expect(dates).toHaveCount(2);
+    const endDate = dates.nth(1);
+    const previousEndDate = await endDate.innerText();
+    await endDate.click();
+
+    const today = page.getByRole('button', { name: '今天', exact: true });
+    const calendar = today.locator('xpath=../..');
+    await expect(calendar).toBeInViewport({ ratio: 1 });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(calendar).toBeInViewport({ ratio: 1 });
+    await expect(today).toBeInViewport({ ratio: 1 });
+    await today.click();
+    await expect(calendar).toBeHidden();
+    await expect(endDate).not.toHaveText(previousEndDate);
+  } finally {
+    await context.close();
+  }
+});
+
 test.describe('统一反馈与通知浮层 @hardening @full', () => {
   test.setTimeout(300_000);
 

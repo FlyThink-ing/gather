@@ -16,6 +16,7 @@ export function useFloatingLayer(
   anchorRef: RefObject<HTMLElement>,
   floatingRef: RefObject<HTMLElement>,
   preferredMaxHeight: number,
+  preferredMinWidth = 0,
 ) {
   const [position, setPosition] = useState<FloatingPosition | null>(null);
 
@@ -28,14 +29,14 @@ export function useFloatingLayer(
     const edge = 8;
     const rect = anchor.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
+    const viewportWidth = document.documentElement.clientWidth;
     const menuHeight = Math.min(floating.getBoundingClientRect().height || preferredMaxHeight, preferredMaxHeight);
     const spaceBelow = viewportHeight - rect.bottom - gap - edge;
     const spaceAbove = rect.top - gap - edge;
     const openAbove = spaceBelow < menuHeight && spaceAbove > spaceBelow;
     const availableHeight = Math.max(0, openAbove ? spaceAbove : spaceBelow);
     const maxHeight = Math.min(preferredMaxHeight, availableHeight);
-    const width = Math.min(rect.width, viewportWidth - edge * 2);
+    const width = Math.min(Math.max(rect.width, preferredMinWidth), viewportWidth - edge * 2);
 
     setPosition({
       top: openAbove
@@ -45,7 +46,7 @@ export function useFloatingLayer(
       width,
       maxHeight,
     });
-  }, [anchorRef, floatingRef, preferredMaxHeight]);
+  }, [anchorRef, floatingRef, preferredMaxHeight, preferredMinWidth]);
 
   useLayoutEffect(() => {
     if (!open) {
