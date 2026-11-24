@@ -114,7 +114,7 @@ export default function Layout() {
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <NotificationBell />
+          <NotificationBell key={developer?.id} />
         </header>
         <main className="flex-1 overflow-auto p-6">
           <Outlet />

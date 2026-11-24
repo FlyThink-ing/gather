@@ -19,6 +19,7 @@ const TYPE_TEXT: Record<string, (p: Record<string, unknown>) => string> = {
 };
 
 const NOTIFICATION_LIMIT = 20;
+const TAB_FLASH_INTERVAL = 1_200;
 const testingNotificationType = /^(?:test_|project_test_|no_test_)/;
 const testingTaskTitle = /^(?:【测试】|\[测试活动\]|\[测试建设\])/;
 
@@ -60,35 +61,85 @@ interface PopupPosition {
 
 export default function NotificationBell() {
   const { developer } = useAuth();
+  const recipientId = developer?.id;
   const [items, setItems] = useState<Notification[]>([]);
+  const [hasTabAlert, setHasTabAlert] = useState(false);
   const [open, setOpen] = useState(false);
   const [marking, setMarking] = useState(false);
   const [notice, setNotice] = useState('');
   const [position, setPosition] = useState<PopupPosition | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const previousItems = useRef<Notification[] | null>(null);
+  const initialInsertIds = useRef(new Set<string>());
+  const loadRequest = useRef(0);
 
   const load = useCallback(async () => {
-    if (!developer) return null;
-    const { data, error } = await loadNotifications(developer.id);
+    if (!recipientId) return null;
+    const request = ++loadRequest.current;
+    const { data, error } = await loadNotifications(recipientId);
+    if (request !== loadRequest.current) return null;
     if (error) return error.message;
+
+    const previous = previousItems.current;
+    const unreadItems = data.filter((item) => !item.is_read);
+    if (unreadItems.length === 0) {
+      setHasTabAlert(false);
+    } else if (document.hidden && unreadItems.some((item) => previous
+      ? !previous.some((oldItem) => oldItem.id === item.id)
+      : initialInsertIds.current.has(item.id),
+    )) {
+      setHasTabAlert(true);
+    }
+    initialInsertIds.current.clear();
+    previousItems.current = data;
     setItems(data);
     return null;
-  }, [developer]);
+  }, [recipientId]);
 
   useEffect(() => {
-    load();
-    if (!developer) return;
+    if (!recipientId) return;
+    void load();
     const ch = supabase
-      .channel(`notif-${developer.id}`)
-      .on(
+      .channel(`notif-${recipientId}`)
+      .on<Notification>(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${developer.id}` },
-        () => load(),
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${recipientId}` },
+        ({ new: item }) => {
+          if (previousItems.current === null) initialInsertIds.current.add(item.id);
+          void load();
+        },
       )
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [developer, load]);
+      .subscribe((status) => { if (status === 'SUBSCRIBED') void load(); });
+    return () => {
+      loadRequest.current++;
+      void supabase.removeChannel(ch);
+    };
+  }, [recipientId, load]);
+
+  useEffect(() => {
+    if (!hasTabAlert) return;
+    if (!document.hidden) {
+      setHasTabAlert(false);
+      return;
+    }
+
+    const originalTitle = document.title;
+    const alertTitle = `有新通知 · ${originalTitle}`;
+    document.title = alertTitle;
+    const timer = window.setInterval(() => {
+      document.title = document.title === alertTitle ? originalTitle : alertTitle;
+    }, TAB_FLASH_INTERVAL);
+    const onVisibilityChange = () => {
+      if (!document.hidden) setHasTabAlert(false);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.title = originalTitle;
+    };
+  }, [hasTabAlert]);
 
   const updatePosition = useCallback(() => {
     const anchor = buttonRef.current;

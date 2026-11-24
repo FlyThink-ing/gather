@@ -301,7 +301,117 @@ test.describe('统一反馈与通知浮层 @hardening @full', () => {
       await closeHardeningSessions(sessions);
     }
   });
+
+  test('后台收到新通知时持续切换标签标题，返回后恢复', async ({ browser }, testInfo) => {
+    const { page, context, developerId } = await openHardeningSession(browser, String(testInfo.project.use.baseURL), 'admin');
+    try {
+      let rows = longNotifications(developerId).reverse();
+      await page.addInitScript(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }));
+      await page.route('**/rest/v1/notifications*', (route) => route.fulfill({ json: rows }));
+      const pushNotification = await mockNotificationPush(page);
+
+      await page.clock.install();
+      await reloadWithNotifications(page);
+      const bell = page.getByRole('button', { name: '通知', exact: true });
+      await expect(bell.locator('span')).toHaveText('20');
+      const originalTitle = 'Gather · 任务管理系统';
+      const alertTitle = `有新通知 · ${originalTitle}`;
+      await expect(page).toHaveTitle(originalTitle);
+
+      const newNotification = {
+        ...rows[0],
+        id: 'uat-new-approval-notification',
+        type: 'task_submitted',
+        payload: { title: 'UAT-待审批任务' },
+        created_at: new Date(Date.parse(rows[0].created_at) + 1_000).toISOString(),
+      };
+      rows = [newNotification, ...rows.slice(0, -1)];
+      await pushNotification(newNotification);
+
+      await expect(page).toHaveTitle(alertTitle);
+      await expect(bell.locator('span')).toHaveText('20');
+      await page.clock.fastForward(1_200);
+      await expect(page).toHaveTitle(originalTitle);
+      await page.clock.fastForward(1_200);
+      await expect(page).toHaveTitle(alertTitle);
+
+      await page.evaluate(() => {
+        Reflect.deleteProperty(document, 'hidden');
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await expect(page).toHaveTitle(originalTitle);
+      await page.clock.fastForward(1_200);
+      await expect(page).toHaveTitle(originalTitle);
+      await expect(bell.locator('span')).toHaveText('20');
+
+      await page.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }));
+      const duplicateRefresh = page.waitForResponse('**/rest/v1/notifications*');
+      await pushNotification(newNotification);
+      await duplicateRefresh;
+      await page.clock.fastForward(1_200);
+      await expect(page).toHaveTitle(originalTitle);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('首次加载通知期间收到实时推送也会闪烁', async ({ browser }, testInfo) => {
+    const { page, context, developerId } = await openHardeningSession(browser, String(testInfo.project.use.baseURL), 'admin');
+    const releaseLoads = deferred();
+    try {
+      const newNotification = {
+        ...longNotifications(developerId)[0],
+        type: 'task_submitted',
+        payload: { title: 'UAT-首次加载期间的待审批任务' },
+      };
+      let rows: NotificationRow[] = [];
+      let requestCount = 0;
+      await page.addInitScript(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }));
+      await page.route('**/rest/v1/notifications*', async (route) => {
+        requestCount++;
+        await releaseLoads.promise;
+        await route.fulfill({ json: rows });
+      });
+      const pushNotification = await mockNotificationPush(page);
+      await page.reload();
+      // 初始查询和订阅成功后的查询均保持挂起，直到收到插入事件。
+      await expect.poll(() => requestCount).toBeGreaterThanOrEqual(2);
+      const requestsBeforePush = requestCount;
+      rows = [newNotification];
+      await pushNotification(newNotification);
+      await expect.poll(() => requestCount).toBeGreaterThan(requestsBeforePush);
+      releaseLoads.resolve();
+
+      await expect(page.getByRole('button', { name: '通知', exact: true }).locator('span')).toHaveText('1');
+      await expect(page).toHaveTitle('有新通知 · Gather · 任务管理系统');
+    } finally {
+      releaseLoads.resolve();
+      await context.close();
+    }
+  });
 });
+
+async function mockNotificationPush(page: Page) {
+  let push: ((row: NotificationRow) => void) | undefined;
+  await page.routeWebSocket('**/realtime/v1/websocket?*', (socket) => {
+    socket.onMessage((message) => {
+      const [joinRef, ref, topic, event, payload] = JSON.parse(String(message));
+      if (event !== 'phx_join') return;
+      socket.send(JSON.stringify([joinRef, ref, topic, 'phx_reply', {
+        status: 'ok',
+        response: { postgres_changes: payload.config.postgres_changes.map((filter: object) => ({ ...filter, id: 1 })) },
+      }]));
+      push = (row) => socket.send(JSON.stringify([joinRef, null, topic, 'postgres_changes', {
+        ids: [1],
+        data: { schema: 'public', table: 'notifications', type: 'INSERT', columns: [], record: row },
+      }]));
+    });
+  });
+  return async (row: NotificationRow) => {
+    await expect.poll(() => !!push).toBe(true);
+    push!(row);
+  };
+}
 
 function guardNativeDialogs(page: Page) {
   const seen: string[] = [];
