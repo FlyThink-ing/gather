@@ -250,6 +250,8 @@ export interface WorkSegment {
   developer_id: string | null;
   started_at: string;
   ended_at: string | null;
+  started_from_status?: TaskStatus | null;
+  ended_to_status?: TaskStatus | null;
   entry_source: 'automatic' | 'manual';
   note: string | null;
   created_by: string | null;

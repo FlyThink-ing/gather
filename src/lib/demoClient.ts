@@ -81,6 +81,7 @@ const TABLE_DEFAULTS: Record<string, Row> = {
   task_pause_periods: { resumed_at: null },
   task_work_segments: {
     developer_id: null, ended_at: null, entry_source: 'automatic', note: null, created_by: null,
+    started_from_status: null, ended_to_status: null,
     voided_at: null, voided_by: null, void_reason: null, updated_at: null,
   },
   test_rounds: {
@@ -240,11 +241,11 @@ function seed(): Store {
   // 实际工时段：插队场景两段闭合（干-停-干-被打断）+ 紧急任务开段；
   // 其余进行中任务在下方统一补开段（正式环境由触发器保证 in_progress 必有开段）
   const task_work_segments: Row[] = [
-    { id: uuid(), task_id: 'tk-liku', developer_id: 'd2', started_at: `${day(-14)}T01:00:00.000Z`, ended_at: `${day(-10)}T10:00:00.000Z` },
-    { id: uuid(), task_id: 'tk-liku', developer_id: 'd2', started_at: `${day(-6)}T01:00:00.000Z`, ended_at: `${day(-2)}T01:00:00.000Z` },
+    { id: uuid(), task_id: 'tk-liku', developer_id: 'd2', started_at: `${day(-14)}T01:00:00.000Z`, ended_at: `${day(-10)}T10:00:00.000Z`, ended_to_status: 'paused' },
+    { id: uuid(), task_id: 'tk-liku', developer_id: 'd2', started_at: `${day(-6)}T01:00:00.000Z`, ended_at: `${day(-2)}T01:00:00.000Z`, started_from_status: 'paused', ended_to_status: 'paused' },
     { id: uuid(), task_id: 'tk-urgent', developer_id: 'd2', started_at: `${day(-2)}T01:30:00.000Z`, ended_at: null },
     // 测试场景：提测方的开发段（已闭合）+ 上一轮 fail 测试的工时段
-    { id: uuid(), task_id: 'tk-anlight', developer_id: 'd6', started_at: `${day(-3)}T01:00:00.000Z`, ended_at: `${day(-1)}T09:00:00.000Z` },
+    { id: uuid(), task_id: 'tk-anlight', developer_id: 'd6', started_at: `${day(-3)}T01:00:00.000Z`, ended_at: `${day(-1)}T09:00:00.000Z`, ended_to_status: 'testing' },
     { id: uuid(), task_id: 'tk-ai-test1', developer_id: 'd11', started_at: `${day(-3)}T02:00:00.000Z`, ended_at: `${day(-1)}T08:00:00.000Z` },
     { id: uuid(), task_id: 'tk-test-activity-demo', developer_id: 'd11', started_at: `${day(-1)}T01:00:00.000Z`, ended_at: `${day(-1)}T05:00:00.000Z`, entry_source: 'manual', note: '核心流程回归第一批次', created_by: 'd11' },
     { id: uuid(), task_id: 'tk-construction-demo', developer_id: 'd12', started_at: `${day(-2)}T01:00:00.000Z`, ended_at: `${day(-2)}T07:00:00.000Z`, entry_source: 'manual', note: '登录自动化脚本开发', created_by: 'd12' },
@@ -719,6 +720,7 @@ export function createDemoClient() {
         developer_id: p.developer_id ?? old.developer_id ?? null,
         started_at: transitionAt,
         ended_at: null,
+        started_from_status: old.status,
       });
       const project = store.projects.find((item) => item.id === (p.project_id ?? old.project_id));
       if (project && (!project.actual_started_at || transitionAt < project.actual_started_at)) {
@@ -727,7 +729,9 @@ export function createDemoClient() {
     }
     if (old.work_source === 'development' && old.status === 'in_progress' && finalNext !== 'in_progress') {
       for (const seg of store.task_work_segments ?? []) {
-        if (seg.task_id === old.id && !seg.ended_at) seg.ended_at = transitionAt;
+        if (seg.task_id !== old.id || seg.ended_at) continue;
+        seg.ended_at = transitionAt;
+        seg.ended_to_status = finalNext;
       }
     }
 

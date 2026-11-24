@@ -46,6 +46,30 @@ interface Props {
 const PLAN_H = 18; // 计划条高度
 const ACTUAL_H = 5; // 实际投入条高度
 
+const SEGMENT_START_LABEL: Partial<Record<TaskStatus, string>> = {
+  paused: '挂起后继续',
+  review: '驳回后继续',
+  testing: '测试退回后继续',
+};
+
+const SEGMENT_END_LABEL: Partial<Record<TaskStatus, string>> = {
+  todo: '转为待处理',
+  paused: '挂起',
+  testing: '提测',
+  review: '提交审核',
+  done: '完成',
+  delayed_done: '完成',
+};
+
+function segmentDescription(segment: WorkSegment): string {
+  if (segment.entry_source === 'manual') return '手工登记';
+  const start = segment.started_from_status && SEGMENT_START_LABEL[segment.started_from_status];
+  const end = segment.ended_at
+    ? (segment.ended_to_status && SEGMENT_END_LABEL[segment.ended_to_status]) || '结束原因未记录'
+    : '进行中';
+  return start ? `${start}、${end}` : end;
+}
+
 export default function GanttChart({ tasks, developers, projects, segments = [] }: Props) {
   const navigate = useNavigate();
   const today = taskCalendarDate();
@@ -139,6 +163,8 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
 
   const totalW = days.length * DAY_W;
   const hoveredExtension = hover ? taskScheduleExtension(hover.task) : null;
+  const hoveredSegments = hover ? segsByTask.get(hover.task.id) ?? [] : [];
+  const tooltipAbove = hover && hover.y > window.innerHeight / 2;
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -344,7 +370,7 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
                           return (
                             <div
                               key={seg.id}
-                              title={`实际投入 ${sd} ~ ${seg.ended_at ? ed : '至今'}`}
+                              title={`实际投入 ${sd} ~ ${seg.ended_at ? ed : '至今'}（${segmentDescription(seg)}）`}
                               className="absolute rounded-full bg-emerald-500 dark:bg-emerald-400"
                               style={{
                                 left: ss * DAY_W + 2,
@@ -396,10 +422,11 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
       {/* 悬停卡片 */}
       {hover && (
         <div
-          className="pointer-events-none fixed z-50 w-64 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-3 text-xs shadow-2xl"
+          className="pointer-events-none fixed z-50 w-64 max-w-[calc(100vw-16px)] rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-3 text-xs shadow-2xl"
           style={{
-            left: Math.min(hover.x + 14, window.innerWidth - 280),
-            top: Math.min(hover.y + 14, window.innerHeight - 180),
+            left: Math.max(8, Math.min(hover.x + 14, window.innerWidth - 264)),
+            top: tooltipAbove ? undefined : hover.y + 14,
+            bottom: tooltipAbove ? window.innerHeight - hover.y + 14 : undefined,
           }}
         >
           <div className="mb-1.5 [overflow-wrap:anywhere] text-sm font-medium text-slate-900 dark:text-slate-100">{hover.task.title}</div>
@@ -419,15 +446,15 @@ export default function GanttChart({ tasks, developers, projects, segments = [] 
               )}
             </div>
             {hoveredExtension && <div>原计划截止 {hoveredExtension.originalDueDate} · 自动顺延 {hoveredExtension.extensionDays} 天</div>}
-            {(segsByTask.get(hover.task.id) ?? []).length > 0 && (
+            {hoveredSegments.length > 0 && (
               <div className="flex gap-1">
                 <span className="shrink-0">实际：</span>
                 <span>
-                  {(segsByTask.get(hover.task.id) ?? [])
-                    .map((s) => `${taskCalendarDate(s.started_at).slice(5)} ~ ${s.ended_at ? taskCalendarDate(s.ended_at).slice(5) : '至今'}`)
+                  {hoveredSegments
+                    .map((s) => `${taskCalendarDate(s.started_at).slice(5)} ~ ${s.ended_at ? taskCalendarDate(s.ended_at).slice(5) : '至今'}（${segmentDescription(s)}）`)
                     .join('、')}
                   <span className="ml-1 text-emerald-600 dark:text-emerald-400">
-                    （已投入 {actualDays(segsByTask.get(hover.task.id) ?? [])} 天）
+                    （已投入 {actualDays(hoveredSegments)} 天）
                   </span>
                 </span>
               </div>
