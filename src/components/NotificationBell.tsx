@@ -10,6 +10,7 @@ import type { Notification } from '../lib/types';
 const TYPE_TEXT: Record<string, (p: Record<string, unknown>) => string> = {
   task_assigned: (p) => `你被指派了任务「${p.title}」`,
   task_submitted: (p) => `任务「${p.title}」已提交审批，待你处理`,
+  task_overdue: (p) => `任务「${p.title}」已逾期（截止日期 ${p.due_date}）`,
   task_approved: (p) => `任务「${p.title}」审批通过（${p.result === 'delayed_done' ? '延期完成' : '已完成'}）`,
   task_rejected: (p) => `任务「${p.title}」审批被驳回：${p.reason ?? ''}`,
   task_comment: () => `你的任务有新评论`,

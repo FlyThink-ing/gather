@@ -481,6 +481,9 @@ function initialPausePeriods(tasks: Row[], segments: Row[]): Row[] {
   return [...lastEnded].map(([taskId, pausedAt]) => ({ id: uuid(), task_id: taskId, paused_at: pausedAt, resumed_at: null }));
 }
 
+const initialOverdueAlerts = (tasks: Row[]) => tasks.filter(isOverdue)
+  .map((task) => ({ task_id: task.id, due_date: task.due_date }));
+
 function loadStore(): Store {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -496,10 +499,15 @@ function loadStore(): Store {
           }
         }
       }
+      if (!s.task_overdue_alerts) {
+        s.task_overdue_alerts = initialOverdueAlerts(s.tasks);
+        localStorage.setItem(STORE_KEY, JSON.stringify(s));
+      }
       return s;
     }
   } catch { /* 损坏则重建 */ }
   const s = seed();
+  s.task_overdue_alerts = initialOverdueAlerts(s.tasks);
   localStorage.setItem(STORE_KEY, JSON.stringify(s));
   return s;
 }
@@ -521,6 +529,25 @@ export function createDemoClient() {
     store.notifications.unshift({
       id: uuid(), recipient_id: recipient, type, payload, is_read: false, created_at: now(),
     });
+  };
+
+  const sendOverdueAlerts = () => {
+    const adminUsers = new Set(store.user_roles.filter((role) => role.role === 'admin').map((role) => role.user_id));
+    const admins = store.developers.filter((person) => person.is_active && adminUsers.has(person.user_id));
+    if (admins.length === 0) return [];
+
+    const knownDeadlines = new Set(store.task_overdue_alerts.map((item) => `${item.task_id}:${item.due_date}`));
+    const previousCount = store.notifications.length;
+    for (const task of store.tasks) {
+      if (!isOverdue(task) || knownDeadlines.has(`${task.id}:${task.due_date}`)) continue;
+      store.task_overdue_alerts.push({ task_id: task.id, due_date: task.due_date });
+      for (const admin of admins) {
+        notify(admin.id, 'task_overdue', { task_id: task.id, title: task.title, due_date: task.due_date });
+      }
+    }
+    const sent = store.notifications.length - previousCount;
+    if (sent > 0) save();
+    return store.notifications.slice(0, sent);
   };
 
   let adminProxyReason: string | null = null;
@@ -784,6 +811,7 @@ export function createDemoClient() {
       const matched = () => rows.filter(matchesFilters);
 
       if (this.op === 'select') {
+        if (this.table === 'notifications') sendOverdueAlerts();
         let out = matched().slice();
         if (this.orderBy.length) {
           out.sort((a, b) => {
@@ -954,7 +982,25 @@ export function createDemoClient() {
     },
   };
 
-  const channelStub = { on() { return this; }, subscribe() { return this; } };
+  const channel = (name: string) => {
+    let onInsert: ((event: { new: Row }) => void) | undefined;
+    let timer: number | undefined;
+    return {
+      on(_type: string, _filter: Row, callback: (event: { new: Row }) => void) {
+        onInsert = callback;
+        return this;
+      },
+      subscribe() {
+        timer = window.setInterval(() => {
+          for (const notification of sendOverdueAlerts()) {
+            if (name === `notif-${notification.recipient_id}`) onInsert?.({ new: notification });
+          }
+        }, 5 * 60_000);
+        return this;
+      },
+      unsubscribe() { window.clearInterval(timer); },
+    };
+  };
 
   const inclusiveDays = (from: string | null, to: string | null) => {
     if (!from || !to || to.slice(0, 10) < from.slice(0, 10)) return null;
@@ -2201,7 +2247,7 @@ export function createDemoClient() {
     from: (table: string) => new Query(table),
     auth,
     rpc,
-    channel: (_name: string) => channelStub,
-    removeChannel: (_ch: any) => {},
+    channel,
+    removeChannel: (subscription: ReturnType<typeof channel>) => subscription.unsubscribe(),
   };
 }

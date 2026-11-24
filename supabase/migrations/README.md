@@ -51,6 +51,7 @@
 | 0022 开发任务挂起记录 | 每次挂起和恢复配对记录，任务可见人员可读取 | `task_pause_periods`、`initialPausePeriods`、`applyTaskRules` |
 | 0023 任务周末值班 | 保存各周末选中的值班日，挂起恢复沿用原计划工期 | `weekend_work_dates`、`reschedule_task_on_resume`、`taskPlanDays` |
 | 0024 工时段状态来源 | 开段记录来源状态，闭段记录去向状态，并用已有记录补齐可确认的历史数据 | `TABLE_DEFAULTS.task_work_segments`、`applyTaskRules` |
+| 0025 管理员逾期通知 | 检查新逾期任务，按任务和截止日期去重，推送给在职管理员 | `initialOverdueAlerts`、`sendOverdueAlerts`、通知频道 |
 | 0003 `handle_new_user()` | 注册建档 | 演示不模拟注册（任意凭据即 admin），无需同步 |
 | 0002 RLS 策略 | 行级权限 | 演示恒 admin 会话，权限矩阵由前端 UI 层体现；如未来演示支持切换角色需补镜像 |
 

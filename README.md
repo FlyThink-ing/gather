@@ -117,11 +117,14 @@ npm run build
 0021_guard_task_resume_deadlines.sql
 0022_record_task_pause_periods.sql
 0023_task_weekend_duty.sql
+0024_record_work_segment_status.sql
+0025_admin_task_overdue_notifications.sql
 ```
 
 迁移包含表结构、RLS 策略、触发器和 RPC。请勿跳号、重复执行或在生产库中直接修改已执行迁移；详细操作见 [DEPLOY.md](DEPLOY.md)。
 
 另外，实时通知依赖将 `public.notifications` 加入 `supabase_realtime` publication，部署文档已提供对应 SQL。
+管理员的逾期通知由 `0025` 注册的数据库任务每 5 分钟检查一次。
 
 ## 部署
 

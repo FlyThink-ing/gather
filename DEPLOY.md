@@ -2,7 +2,7 @@
 
 > 适用对象：负责上线的后端/运维同事，默认读者会使用 Linux、SSH 和 Nginx，但**没有接触过 Supabase**。  
 > 适用项目：当前仓库的 React 静态前端 + 自托管 Supabase。  
-> 迁移清单已覆盖 `0001`～`0023`。Supabase 自托管配置会持续更新，实际安装时应同时查看文末官方文档。
+> 迁移清单已覆盖 `0001`～`0025`。Supabase 自托管配置会持续更新，实际安装时应同时查看文末官方文档。
 
 ---
 
@@ -213,7 +213,7 @@ test -f webpack.config.js
 ls -1 supabase/migrations/*.sql
 ```
 
-迁移文件必须完整显示 `0001_init.sql` 到 `0023_task_weekend_duty.sql`，共 23 个按编号连续排列的 SQL 文件；缺少任一文件时停止部署并核对代码版本。
+迁移文件应从 `0001_init.sql` 到 `0025_admin_task_overdue_notifications.sql`，共 25 个连续编号的 SQL 文件。
 
 ---
 
@@ -368,7 +368,7 @@ docker compose logs --tail 100 realtime
 `supabase/migrations` 中的 SQL 不只是建表，还包含 RLS、业务触发器、RPC、审批规则和项目驾驶舱。后一个文件依赖前一个文件，必须严格执行：
 
 ```text
-0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014 → 0015 → 0016 → 0017 → 0018 → 0019 → 0020 → 0021 → 0022 → 0023
+0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014 → 0015 → 0016 → 0017 → 0018 → 0019 → 0020 → 0021 → 0022 → 0023 → 0024 → 0025
 ```
 
 最近的迁移包括以下变更：
@@ -387,6 +387,8 @@ docker compose logs --tail 100 realtime
 | `0021_guard_task_resume_deadlines.sql` | 限制自动顺延条件，记录截止日期顺延审计，支持工作台按任务类型和挂起状态汇总。 |
 | `0022_record_task_pause_periods.sql` | 为开发任务记录每次挂起和恢复的时间点，供任务详情和审批读取。 |
 | `0023_task_weekend_duty.sql` | 保存任务的周末值班日期，并在自动顺延时保留原截止日期和计划工期。 |
+| `0024_record_work_segment_status.sql` | 记录工时段开始和结束时的任务状态。 |
+| `0025_admin_task_overdue_notifications.sql` | 通过 `pg_cron` 每 5 分钟通知管理员，对任务和截止日期去重。 |
 
 这些脚本不是为反复执行设计的。新数据库只执行一次；已存在数据库升级时只执行尚未执行的新编号。不要看到报错后从 `0001` 全部重跑。
 
@@ -467,6 +469,16 @@ docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -1 \
   < supabase/migrations/0023_task_weekend_duty.sql
 ```
 
+数据库已执行至 `0023` 后，执行尚未应用的 `0024` 和 `0025`。`0025` 要求 PostgreSQL 已预加载 `pg_cron`，可用 `show shared_preload_libraries;` 检查。[Supabase Cron 安装说明](https://supabase.com/docs/guides/cron/install)
+
+```bash
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -1 \
+  < supabase/migrations/0024_record_work_segment_status.sql
+
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -1 \
+  < supabase/migrations/0025_admin_task_overdue_notifications.sql
+```
+
 执行成功后，按第 8 节重新构建前端，在预发布环境按第 7.4 节验证权限和统计，再发布前端。
 
 ### 7.3 启用通知实时推送
@@ -531,6 +543,20 @@ where pubname='supabase_realtime'
 - `0021` 验证截止日前或当天挂起、跨天恢复时可以顺延并留下审计记录，审批确认能看到原计划和当前截止日期。当天挂起当天恢复、以及逾期后才挂起的任务恢复时沿用原截止日期。工作台的挂起卡片数应与点击后看到的任务总数一致。
 - `0022` 验证任务当天两次挂起并继续后，审批可看到两条挂起记录及各自时间和时长。
 - `0023` 验证跨两个周末的任务可分别选择值班日期。保存后核对任务列表的计划工期与截止日期。
+- `0025` 验证新逾期任务在一次调度后出现在管理员铃铛中。同一任务的同一截止日期只发送一次，启用前的逾期积压只登记，不补发。
+
+检查逾期通知的调度及最近一次运行。
+
+```bash
+docker exec supabase-db psql -U postgres -d postgres -c "
+select j.schedule, j.active, r.status, r.start_time, r.return_message
+from cron.job j
+left join lateral (
+  select status, start_time, return_message from cron.job_run_details
+  where jobid = j.jobid order by runid desc limit 1
+) r on true
+where j.jobname = 'gather-admin-task-overdue';"
+```
 
 ### 7.5 记录已执行的迁移
 
@@ -1117,7 +1143,7 @@ SUPABASE_ANON_KEY=<ANON_KEY>
 - 禁止无备份升级 Supabase 或执行新迁移。
 - 禁止在不理解影响时执行 `docker compose down -v`、`sh reset.sh`、删除 `volumes/db/data`。
 - 禁止用 `latest` 漂移升级单个 Supabase 镜像。
-- 禁止在生产库盲目重复执行 `0001` 到 `0023`。
+- 禁止在生产库盲目重复执行 `0001` 到 `0025`。
 
 ---
 
@@ -1130,4 +1156,4 @@ SUPABASE_ANON_KEY=<ANON_KEY>
 - [Supabase：新版自托管 API/Auth 密钥](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys)
 - [Docker：Ubuntu 安装 Docker Engine](https://docs.docker.com/engine/install/ubuntu/)
 
-当官方文档与本文在 Supabase 容器名、环境变量或 Compose 文件结构上不一致时，以**本次下载的官方 `.env.example`、Compose 文件和官方文档**为准，同时保持本项目不可变的要求：前端变量名、`0001→0023` 迁移顺序、通知 Realtime publication、RLS、安全端口和备份策略。
+当官方文档与本文在 Supabase 容器名、环境变量或 Compose 文件结构上不一致时，以**本次下载的官方 `.env.example`、Compose 文件和官方文档**为准，同时保持 Gather 的前端变量名、`0001→0025` 迁移顺序、通知 Realtime publication、RLS、安全端口和备份策略。
