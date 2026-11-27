@@ -68,6 +68,7 @@ export interface Project {
 export interface ProjectSummary extends Project {
   plan_days: number | null;
   actual_cycle_days: number | null;
+  actual_effort_days: number;
   actual_effort_hours: number;
   actual_effort_person_days: number;
   dev_task_total: number;
@@ -137,6 +138,7 @@ export interface ProjectPersonMetric {
   completed_task_count: number;
   review_task_count: number;
   overdue_task_count: number;
+  actual_effort_days: number;
   actual_effort_hours: number;
   actual_effort_person_days: number;
 }
@@ -565,6 +567,7 @@ export interface ProjectTestSummary {
   bug_count: number;
   reopen_count: number;
   blocked_count: number;
+  test_actual_days: number;
   test_actual_hours: number;
   cycles: TestCycle[];
 }

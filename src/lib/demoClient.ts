@@ -572,6 +572,7 @@ export function createDemoClient() {
 
   const taskSegments = (taskId: string) => (store.task_work_segments ?? [])
     .filter((segment) => segment.task_id === taskId) as WorkSegment[];
+  const taskActualDays = (taskId: string) => actualDays(taskSegments(taskId), false);
 
   // 模拟数据库触发器（0003）：enforce_task_rules / track_work_segments / notify_task_update
   // ⚠ 同步纪律：0003_triggers_seed.sql 的任何行为性修改必须同步到这里（见 supabase/migrations/README.md）
@@ -1040,6 +1041,7 @@ export function createDemoClient() {
       ...project,
       plan_days: inclusiveDays(project.start_date, project.end_date),
       actual_cycle_days: actualCycle,
+      actual_effort_days: tasks.reduce((sum, task) => sum + taskActualDays(task.id), 0),
       actual_effort_hours: oneDecimal(actualHours),
       actual_effort_person_days: oneDecimal(actualHours / 8),
       dev_task_total: devTasks.length,
@@ -1129,13 +1131,14 @@ export function createDemoClient() {
         position: person?.position ?? null,
         task_count: 0, dev_task_count: 0, test_task_count: 0, completed_task_count: 0,
         review_task_count: 0, overdue_task_count: 0,
-        actual_effort_hours: 0, actual_effort_person_days: 0,
+        actual_effort_days: 0, actual_effort_hours: 0, actual_effort_person_days: 0,
       };
       current.task_count += 1;
       current[task.task_type === 'test' ? 'test_task_count' : 'dev_task_count'] += 1;
       if (['done', 'delayed_done'].includes(task.status)) current.completed_task_count += 1;
       if (task.status === 'review') current.review_task_count += 1;
       if (isOverdue(task)) current.overdue_task_count += 1;
+      current.actual_effort_days += taskActualDays(task.id);
       current.actual_effort_hours += taskHours(task.id);
       peopleMap.set(key, current);
     }
@@ -1143,7 +1146,7 @@ export function createDemoClient() {
       ...person,
       actual_effort_hours: oneDecimal(person.actual_effort_hours),
       actual_effort_person_days: oneDecimal(person.actual_effort_hours / 8),
-    })).sort((a, b) => b.actual_effort_hours - a.actual_effort_hours || a.person_name.localeCompare(b.person_name));
+    })).sort((a, b) => b.actual_effort_days - a.actual_effort_days || a.person_name.localeCompare(b.person_name));
 
     const timeline: Row[] = [
       { event_type: 'project_created', occurred_at: project.created_at, title: '项目创建', detail: null, task_id: null },
@@ -1460,6 +1463,7 @@ export function createDemoClient() {
           failed_cycle_count: cycles.filter((item) => item.status === 'failed').length,
           active_cycle_count: cycles.filter((item) => !['passed', 'failed', 'cancelled', 'returned'].includes(item.status)).length,
           executed_count: sum('executed_count'), bug_count: sum('bug_count'), reopen_count: sum('reopen_count'), blocked_count: sum('blocked_count'),
+          test_actual_days: [...activityTaskIds].reduce((total, taskId) => total + taskActualDays(taskId), 0),
           test_actual_hours: oneDecimal((store.task_work_segments ?? []).filter((item) => activityTaskIds.has(item.task_id)).reduce((total, item) => total + segmentHours(item), 0)),
           cycles: cycles.map(cycleDetail),
         },
@@ -2179,7 +2183,7 @@ export function createDemoClient() {
       const items = rows.slice((page - 1) * pageSize, page * pageSize).map((task) => ({
         ...task,
         actual_effort_hours: oneDecimal(taskHours(task.id)),
-        actual_day_count: actualDays(taskSegments(task.id), false),
+        actual_day_count: taskActualDays(task.id),
       }));
       return { data: { items, total, page, page_size: pageSize }, error: null };
     }

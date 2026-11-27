@@ -30,7 +30,6 @@ import {
   type ProjectSummary,
   PROJECT_STATUS_LABEL,
 } from '../lib/types';
-import { formatEffort } from '../lib/workload';
 
 const STATUS_CLS: Record<ProjectStatus, string> = {
   active: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
@@ -293,7 +292,7 @@ export default function Projects() {
                   value={`${p.plan_days ?? '—'} 天 / ${p.actual_cycle_days ?? '—'} 天`}
                   hint={p.actual_started_at ? (p.completed_at ? '已完成周期' : '当前已运行') : '尚无真实启动记录'}
                 />
-                <SummaryBox icon={<Clock3 size={16} />} label="实际投入" value={formatEffort(p.actual_effort_hours)} hint="工时段累计，不按人员并发去重" />
+                <SummaryBox icon={<Clock3 size={16} />} label="实际投入" value={`${p.actual_effort_days} 天`} hint="累计各任务的实际投入天数" />
                 <SummaryBox
                   icon={<Gauge size={16} />}
                   label="开发任务进度"

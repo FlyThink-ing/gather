@@ -29,7 +29,6 @@ import {
   type ProjectCockpit,
   type ProjectTestSummary,
 } from '../lib/types';
-import { formatEffort } from '../lib/workload';
 
 const pct = (value: number | null) => value == null ? '—' : `${value}%`;
 const numberValue = (value: number | null | undefined) => value == null ? '—' : String(value);
@@ -204,7 +203,7 @@ export default function ProjectDetail() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <OverviewMetric icon={<CalendarDays size={17} />} label="计划周期" value={data.plan_days == null ? '—' : `${data.plan_days} 天`} hint="计划开始至计划结束，含首尾" />
           <OverviewMetric icon={<Clock3 size={17} />} label={data.completed_at ? '实际周期' : '已运行周期'} value={data.actual_cycle_days == null ? '—' : `${data.actual_cycle_days} 天`} hint={data.actual_started_at ? `实际启动 ${new Date(data.actual_started_at).toLocaleString('zh-CN', { hour12: false })}` : '尚无可靠工时段，未伪造启动时间'} />
-          <OverviewMetric icon={<Users size={17} />} label="实际投入" value={formatEffort(data.actual_effort_hours)} hint="全部工时段累加，不对并发人员去重" />
+          <OverviewMetric icon={<Users size={17} />} label="实际投入" value={`${data.actual_effort_days} 天`} hint="累计各任务的实际投入天数" />
           <OverviewMetric icon={<Gauge size={17} />} label="开发完成率" value={`${data.dev_task_completed}/${data.dev_task_total} · ${pct(data.dev_completion_rate)}`} hint="仅统计开发任务" onClick={() => openTasks({ type: 'dev' })} />
         </div>
 
@@ -241,7 +240,7 @@ export default function ProjectDetail() {
                   </div>
                   <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                     {projectTest.plan_id
-                      ? `${projectTest.plan_title} · ${projectTest.cycle_count} 轮 · 执行 ${projectTest.executed_count} · Bug ${projectTest.bug_count} · 实际投入 ${formatEffort(projectTest.test_actual_hours)}`
+                      ? `${projectTest.plan_title} · ${projectTest.cycle_count} 轮 · 执行 ${projectTest.executed_count} · Bug ${projectTest.bug_count} · 实际投入 ${projectTest.test_actual_days} 天`
                       : projectTest.no_test_status === 'pending'
                         ? `无需测试申请待测试组长确认：${projectTest.no_test_reason}`
                         : '尚未发起项目级测试。开发任务不再从单个任务提测。'}
@@ -313,7 +312,7 @@ export default function ProjectDetail() {
       )}
 
       <section id="project-people" className="scroll-mt-20 space-y-4">
-        <SectionTitle icon={<Users size={18} />} title="人员与投入" hint="投入来自工时段；人员任务明细继续从统一任务入口查看。" />
+        <SectionTitle icon={<Users size={18} />} title="人员与投入" hint="按人员累计任务投入天数，可查看任务明细。" />
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           {data.people.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">暂无项目人员投入</div> : (
             <div className="overflow-x-auto">
@@ -322,7 +321,7 @@ export default function ProjectDetail() {
                 <tbody>{data.people.map((person) => (
                   <tr key={person.developer_id ?? 'unassigned'} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-5 py-3"><div className="font-medium text-slate-900 dark:text-white">{person.person_name}</div><div className="text-xs text-slate-500">{person.position ?? (person.developer_id ? '未设置职位' : '待分配')}</div></td>
-                    <td className="px-5 py-3">{person.task_count}</td>{testingFeaturesEnabled && <td className="px-5 py-3">{person.dev_task_count} / {person.test_task_count}</td>}<td className="px-5 py-3">{person.completed_task_count}</td><td className="px-5 py-3">{person.review_task_count} / {person.overdue_task_count}</td><td className="px-5 py-3">{formatEffort(person.actual_effort_hours)}</td>
+                    <td className="px-5 py-3">{person.task_count}</td>{testingFeaturesEnabled && <td className="px-5 py-3">{person.dev_task_count} / {person.test_task_count}</td>}<td className="px-5 py-3">{person.completed_task_count}</td><td className="px-5 py-3">{person.review_task_count} / {person.overdue_task_count}</td><td className="px-5 py-3">{person.actual_effort_days} 天</td>
                     <td className="px-5 py-3 text-right"><button className="inline-flex items-center gap-1 text-brand-600 hover:underline dark:text-brand-400" onClick={() => openTasks({ assignee: person.developer_id ?? 'unassigned' })}>任务明细 <ChevronRight size={13} /></button></td>
                   </tr>
                 ))}</tbody>

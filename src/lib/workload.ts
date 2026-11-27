@@ -71,22 +71,33 @@ export function formatEffort(hours: number): string {
 
 type WorkDaySegment = Pick<WorkSegment, 'started_at' | 'ended_at' | 'voided_at'>;
 
-function workDays(segments: WorkDaySegment[], openEnd: string | null) {
-  const days = new Set<number>();
+/** 实际投入天数：合并工时段覆盖的自然日区间，首尾均计入。 */
+export function actualDays(segments: WorkDaySegment[], includeOpen = true): number {
+  const openEnd = includeOpen ? taskCalendarDate() : null;
+  const ranges: { start: number; end: number }[] = [];
   for (const segment of segments) {
     if (segment.voided_at) continue;
-    const endDate = segment.ended_at ? taskCalendarDate(segment.ended_at) : openEnd;
+    const started = new Date(segment.started_at);
+    const ended = segment.ended_at ? new Date(segment.ended_at) : null;
+    if (!Number.isFinite(started.getTime())) continue;
+    if (ended && (!Number.isFinite(ended.getTime()) || ended < started)) continue;
+    const endDate = ended ? taskCalendarDate(ended) : openEnd;
     if (!endDate) continue;
-    const start = Date.parse(taskCalendarDate(segment.started_at));
+    const start = Date.parse(taskCalendarDate(started));
     const end = Date.parse(endDate);
-    for (let day = start; day <= end; day += DAY_MS) days.add(day);
+    if (start <= end) ranges.push({ start, end });
+  }
+
+  ranges.sort((first, second) => first.start - second.start);
+  let days = 0;
+  let countedThrough = -Infinity;
+  for (const { start, end } of ranges) {
+    if (end <= countedThrough) continue;
+    const firstUncounted = Math.max(start, countedThrough + DAY_MS);
+    days += (end - firstUncounted) / DAY_MS + 1;
+    countedThrough = end;
   }
   return days;
-}
-
-/** 实际投入天数：工时段覆盖的自然日去重计数（可包含尚未结束的工时段）。 */
-export function actualDays(segments: WorkDaySegment[], includeOpen = true): number {
-  return workDays(segments, includeOpen ? taskCalendarDate() : null).size;
 }
 
 export function taskResumeExtension(dueDate: string, plannedDays: number, segments: WorkDaySegment[], resumeDate: string) {

@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-} from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { CheckCircle2, AlertTriangle, Clock, Timer } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { taskStatusLabel, testingFeaturesEnabled } from '../lib/testingFeatures';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/PageHeader';
 import Select from '../components/Select';
-import { taskPlanDays, actualDays, isTaskOverdue } from '../lib/workload';
+import { taskPlanDays, actualDays, isTaskOverdue, isUnfinished } from '../lib/workload';
 import { scopeTasks, defaultScope, taskTeamIds } from '../lib/scope';
 import {
   type Task, type Developer, type Project, type Team, type TaskStatus, type Priority, type WorkSegment, type TestRound,
@@ -36,6 +34,20 @@ const PRIORITY_COLOR: Record<Priority, string> = {
 
 const card = 'rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5';
 const cardTitle = 'mb-4 text-base font-semibold text-slate-900 dark:text-white';
+const efficiencyWeights = { completion: 30, onTime: 25, delivery: 45 };
+const TASK_PAGE_SIZE = 1000;
+
+async function loadAnalyticsTasks(): Promise<Task[]> {
+  const tasks: Task[] = [];
+  for (let offset = 0; ; offset += TASK_PAGE_SIZE) {
+    const query = supabase.from('tasks').select('*').order('id');
+    if (!testingFeaturesEnabled) query.eq('task_type', 'dev');
+    const { data, error } = await query.range(offset, offset + TASK_PAGE_SIZE - 1);
+    if (error) throw error;
+    tasks.push(...(data as Task[]));
+    if (data.length < TASK_PAGE_SIZE) return tasks;
+  }
+}
 
 type RangeKey = 'all' | '7d' | '30d';
 
@@ -49,6 +61,7 @@ export default function Analytics() {
   const [segments, setSegments] = useState<WorkSegment[]>([]);
   const [testRounds, setTestRounds] = useState<TestRound[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   // 筛选
   const [range, setRange] = useState<RangeKey>('all');
   const [fTeam, setFTeam] = useState('');
@@ -56,24 +69,29 @@ export default function Analytics() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const taskQuery = supabase.from('tasks').select('*');
-    const [t, d, p, tm, dt, ws, tr] = await Promise.all([
-      testingFeaturesEnabled ? taskQuery : taskQuery.eq('task_type', 'dev'),
-      supabase.from('developers').select('*').eq('is_active', true).order('name'),
-      supabase.from('projects').select('*'),
-      supabase.from('teams').select('*'),
-      supabase.from('developer_teams').select('*'),
-      supabase.from('task_work_segments').select('*'),
-      testingFeaturesEnabled ? supabase.from('test_rounds').select('*') : { data: [] },
-    ]);
-    setTasks((t.data as Task[]) ?? []);
-    setDevelopers((d.data as Developer[]) ?? []);
-    setProjects((p.data as Project[]) ?? []);
-    setTeams((tm.data as Team[]) ?? []);
-    setDevTeams((dt.data as DevTeam[]) ?? []);
-    setSegments((ws.data as WorkSegment[]) ?? []);
-    setTestRounds((tr.data as TestRound[]) ?? []);
-    setLoading(false);
+    setLoadError(false);
+    try {
+      const [t, d, p, tm, dt, ws, tr] = await Promise.all([
+        loadAnalyticsTasks(),
+        supabase.from('developers').select('*').eq('is_active', true).order('name'),
+        supabase.from('projects').select('*'),
+        supabase.from('teams').select('*'),
+        supabase.from('developer_teams').select('*'),
+        supabase.from('task_work_segments').select('*'),
+        testingFeaturesEnabled ? supabase.from('test_rounds').select('*') : { data: [] },
+      ]);
+      setTasks(t);
+      setDevelopers((d.data as Developer[]) ?? []);
+      setProjects((p.data as Project[]) ?? []);
+      setTeams((tm.data as Team[]) ?? []);
+      setDevTeams((dt.data as DevTeam[]) ?? []);
+      setSegments((ws.data as WorkSegment[]) ?? []);
+      setTestRounds((tr.data as TestRound[]) ?? []);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -172,7 +190,7 @@ export default function Analytics() {
   }, [segments]);
 
   const total = scoped.length;
-  const completedTasks = scoped.filter((t) => t.status === 'done' || t.status === 'delayed_done');
+  const completedTasks = scoped.filter((t) => !isUnfinished(t));
   const completed = completedTasks.length;
   const onTime = scoped.filter((t) => t.status === 'done').length;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -194,9 +212,10 @@ export default function Analytics() {
     count: scoped.filter((t) => t.status === s).length,
   }));
   const priorityDist = (Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => ({
-    name: PRIORITY_LABEL[p],
+    label: PRIORITY_LABEL[p],
     priority: p,
-    数量: scoped.filter((t) => t.priority === p).length,
+    total: scoped.filter((t) => t.priority === p).length,
+    completed: completedTasks.filter((t) => t.priority === p).length,
   }));
 
   // 项目进度（按完成率排序，分段：完成/进行中/待审核/其他）
@@ -217,31 +236,61 @@ export default function Analytics() {
     .filter((x) => x.total > 0)
     .sort((a, b) => b.rate - a.rate || b.total - a.total);
 
-  // 成员效率：完成率 + 按时率 + 实际投入天数
-  const efficiency = developers
-    .map((d) => {
-      const mine = scoped.filter((t) => t.developer_id === d.id);
-      const doneAll = mine.filter((t) => t.status === 'done' || t.status === 'delayed_done');
-      const doneOnTime = mine.filter((t) => t.status === 'done').length;
-      const invested = actualDays(mine.flatMap((t) => segsByTask.get(t.id) ?? []));
-      return {
-        dev: d,
+  const { efficiency, deliveryTarget } = useMemo(() => {
+    const members = developers.flatMap((dev) => {
+      const mine = scoped.filter((t) => t.developer_id === dev.id);
+      if (mine.length === 0) return [];
+
+      let plannedDays = 0;
+      let deliveredDays = 0;
+      let done = 0;
+      let onTime = 0;
+      for (const task of mine) {
+        const days = Math.max(1, taskPlanDays(task) ?? 1);
+        plannedDays += days;
+        if (isUnfinished(task)) continue;
+        deliveredDays += days;
+        done++;
+        if (task.status === 'done') onTime++;
+      }
+
+      return [{
+        dev,
         total: mine.length,
-        done: doneAll.length,
-        rate: mine.length > 0 ? Math.round((doneAll.length / mine.length) * 100) : 0,
-        onTimeRate: doneAll.length > 0 ? Math.round((doneOnTime / doneAll.length) * 100) : null,
-        invested,
-      };
-    })
-    .filter((x) => x.total > 0)
-    .sort((a, b) => b.rate - a.rate || b.done - a.done);
+        done,
+        completion: done / mine.length,
+        onTime: done > 0 ? onTime / done : null,
+        plannedDays,
+        deliveredDays,
+        invested: actualDays(mine.flatMap((t) => segsByTask.get(t.id) ?? [])),
+      }];
+    });
+
+    if (members.length === 0) return { efficiency: [], deliveryTarget: 0 };
+    const workloads = members.map((member) => member.plannedDays).sort((a, b) => a - b);
+    const middle = workloads.length / 2;
+    // 两个中间值的和等于中位数的两倍，奇数时取同一个中间值。
+    const deliveryTarget = workloads[Math.ceil(middle) - 1] + workloads[Math.floor(middle)];
+
+    const efficiency = members.map((member) => ({
+      ...member,
+      score: member.completion * efficiencyWeights.completion
+        + (member.onTime ?? 0) * efficiencyWeights.onTime
+        + Math.min(member.deliveredDays / deliveryTarget, 1) * efficiencyWeights.delivery,
+      rate: Math.round(member.completion * 100),
+      onTimeRate: member.onTime == null ? null : Math.round(member.onTime * 100),
+    })).sort((a, b) => b.score - a.score || b.deliveredDays - a.deliveredDays || b.done - a.done);
+
+    return { efficiency, deliveryTarget };
+  }, [developers, scoped, segsByTask]);
 
   if (loading) return <div className="py-24 text-center text-slate-500">加载中…</div>;
-
-  const tooltipStyle = {
-    contentStyle: { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 },
-    labelStyle: { color: '#e2e8f0' },
-  };
+  if (loadError) return (
+    <div className="py-24 text-center text-sm text-slate-500">
+      <p role="alert">任务数据加载失败</p>
+      <button type="button" onClick={load} className="mt-2 font-medium text-brand-600 dark:text-brand-400">重试</button>
+    </div>
+  );
 
   const insight = [
     {
@@ -367,60 +416,91 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* 整体完成率 */}
-        <div className={card}>
-          <h2 className={cardTitle}>整体完成率</h2>
-          <div className="relative mx-auto" style={{ width: 220, height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: '已完成', value: completed },
-                    { name: '未完成', value: Math.max(total - completed, total === 0 ? 1 : 0) },
-                  ]}
-                  innerRadius={72}
-                  outerRadius={95}
-                  dataKey="value"
-                  startAngle={90}
-                  endAngle={-270}
-                  stroke="none"
-                  isAnimationActive={false}
-                >
-                  <Cell fill="#10b981" />
-                  <Cell fill="rgba(148,163,184,0.18)" />
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-3xl font-semibold text-slate-900 dark:text-white">{completionRate}%</span>
-              <span className="mt-1 text-xs text-slate-500">{completed} / {total} 已完成</span>
-              {onTimeRate != null && (
-                <span className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">按时率 {onTimeRate}%</span>
-              )}
+        <section className={`${card} flex min-w-0 flex-col`} aria-labelledby="task-overview-heading">
+          <h2 id="task-overview-heading" className={cardTitle}>任务完成概览</h2>
+          <div className="flex flex-1 flex-wrap items-center justify-center gap-x-6 gap-y-5">
+            <div className="w-36 shrink-0 text-center">
+              <h3 className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">整体完成率</h3>
+              <div className="relative h-36">
+                <div aria-hidden="true" className="absolute inset-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: '已完成', value: completed },
+                          { name: '未完成', value: total === 0 ? 1 : total - completed },
+                        ]}
+                        innerRadius={54}
+                        outerRadius={71}
+                        dataKey="value"
+                        startAngle={90}
+                        endAngle={-270}
+                        stroke="none"
+                        isAnimationActive={false}
+                      >
+                        <Cell fill={STATUS_COLOR.done} />
+                        <Cell fill="rgba(148,163,184,0.22)" />
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center tabular-nums">
+                  <span className="text-3xl font-semibold text-slate-900 dark:text-white">{completionRate}%</span>
+                  <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">{completed} / {total} 已完成</span>
+                  {onTimeRate != null && (
+                    <span className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">按时率 {onTimeRate}%</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="min-w-0 flex-[1_1_16rem]">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">优先级分布</h3>
+                <div className="flex gap-3 text-xs text-slate-500 dark:text-slate-400">
+                  <span>已完成 / 总数</span>
+                  <span className="w-12 text-right">占全部</span>
+                </div>
+              </div>
+              <ul className="space-y-3">
+                {priorityDist.map((x) => {
+                  const share = total > 0 ? (x.total / total) * 100 : 0;
+                  return (
+                    <li key={x.priority}>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[x.priority] }} />
+                          {x.label}
+                        </span>
+                        <span className="flex gap-3 tabular-nums">
+                          <span className="font-medium text-slate-700 dark:text-slate-300">{x.completed} / {x.total}</span>
+                          <span className="w-12 text-right text-slate-500 dark:text-slate-400">{total > 0 ? `${Math.round(share)}%` : '—'}</span>
+                        </span>
+                      </div>
+                      <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${share}%` }}>
+                          <div style={{ flex: x.completed, background: STATUS_COLOR.done }} />
+                          <div className="bg-slate-400" style={{ flex: x.total - x.completed }} />
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-sm" style={{ background: STATUS_COLOR.done }} /> 已完成
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-sm bg-slate-400" /> 未完成
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-
-        {/* 优先级分布 */}
-        <div className={card}>
-          <h2 className={cardTitle}>优先级分布</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={priorityDist} layout="vertical" barSize={18}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" horizontal={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" width={44} tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
-              <Bar dataKey="数量" radius={[0, 4, 4, 0]}>
-                {priorityDist.map((x) => (
-                  <Cell key={x.priority} fill={PRIORITY_COLOR[x.priority]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        </section>
 
         {/* 项目进度 */}
-        <div className={card}>
+        <div className={`${card} xl:col-span-2`}>
           <h2 className={cardTitle}>项目进度</h2>
           {projectProgress.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500">暂无数据</div>
@@ -521,19 +601,27 @@ export default function Analytics() {
       )}
 
       {/* 团队成员效率 */}
-      <div className={`${card} mt-4`}>
-        <h2 className={cardTitle}>团队成员效率</h2>
+      <section className={`${card} mt-4`} aria-labelledby="member-efficiency-heading">
+        <h2 id="member-efficiency-heading" className="mb-2 text-base font-semibold text-slate-900 dark:text-white">团队成员效率</h2>
+        {efficiency.length > 0 && (
+          <p className="mb-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+            综合分由完成率（{efficiencyWeights.completion}%）、按时率（{efficiencyWeights.onTime}%）和已交付工作量（{efficiencyWeights.delivery}%）加权计算。
+            已交付工作量按已完成任务的计划工期累计，无有效工期按 1 天计。当前交付工作量达到 {deliveryTarget} 天可得该项满分，基准为筛选范围内成员计划工期总量中位数的 2 倍。
+          </p>
+        )}
         {efficiency.length === 0 ? (
           <div className="py-12 text-center text-sm text-slate-500">暂无数据</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500">
                   <th className="py-2 pr-3 font-medium">#</th>
                   <th className="py-2 pr-3 font-medium">成员</th>
+                  <th scope="col" aria-sort="descending" className="py-2 pr-3 font-medium">综合分</th>
                   <th className="py-2 pr-3 font-medium">完成率</th>
                   <th className="py-2 pr-3 font-medium">按时率</th>
+                  <th className="py-2 pr-3 font-medium">已交付工作量</th>
                   <th className="py-2 pr-3 font-medium">实际投入</th>
                   <th className="py-2 font-medium">任务</th>
                 </tr>
@@ -555,6 +643,9 @@ export default function Analytics() {
                         </div>
                       </div>
                     </td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+                      {x.score.toFixed(1)} <span className="text-xs font-normal text-slate-500">分</span>
+                    </td>
                     <td className="py-2.5 pr-3">
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -575,6 +666,9 @@ export default function Analytics() {
                         </span>
                       )}
                     </td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-xs text-slate-500 dark:text-slate-400">
+                      {x.deliveredDays} 天
+                    </td>
                     <td className="py-2.5 pr-3 text-xs text-slate-500 dark:text-slate-400">
                       {x.invested > 0 ? `${x.invested} 天` : '—'}
                     </td>
@@ -587,7 +681,7 @@ export default function Analytics() {
             </table>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

@@ -28,6 +28,28 @@ test('按每个周末的值班日期计算计划工期，保留原定截止日�
   expect(taskScheduleExtension(resumed)).toEqual({ originalDueDate: '2026-11-30', dueDate: '2026-12-04', extensionDays: 4 });
 });
 
+test('任务实际投入按北京时间自然日计入首尾，同一日期去重', () => {
+  const sameDay = { started_at: '2026-11-27T15:00:00+08:00', ended_at: '2026-11-27T17:00:00+08:00', voided_at: null };
+  const overnight = { started_at: '2026-11-27T23:59:00+08:00', ended_at: '2026-11-28T00:00:00+08:00', voided_at: null };
+  const lateSubmission = { ...overnight, ended_at: '2026-11-28T17:00:00+08:00' };
+  const open = { ...overnight, ended_at: null };
+  const voided = { ...overnight, voided_at: '2026-11-28T09:00:00+08:00' };
+  const reversed = { ...sameDay, ended_at: '2026-11-27T14:00:00+08:00' };
+  expect(actualDays([sameDay], false)).toBe(1);
+  expect(actualDays([{ ...sameDay, ended_at: sameDay.started_at }], false)).toBe(1);
+  expect(actualDays([overnight], false)).toBe(2);
+  expect(actualDays([sameDay, lateSubmission], false)).toBe(2);
+  expect(actualDays([sameDay, open, voided, reversed], false)).toBe(1);
+});
+
+test('实际投入可累计跨闰日和长跨度的日期，跳过中间没有投入的日期', () => {
+  const leap = { started_at: '2024-02-28T23:59:00+08:00', ended_at: '2024-03-01T00:00:00+08:00', voided_at: null };
+  const year = { started_at: '2025-12-31T23:59:00+08:00', ended_at: '2026-01-01T00:00:00+08:00', voided_at: null };
+  const long = { started_at: '2000-01-01T00:00:00+08:00', ended_at: '2400-01-01T00:00:00+08:00', voided_at: null };
+  expect(actualDays([year, leap], false)).toBe(5);
+  expect(actualDays([year, long, leap], false)).toBe(146098);
+});
+
 test('挂起排除逾期，到期前挂起且跨天恢复才顺延', () => {
   const overdueTask = { due_date: '2000-11-18', completed_at: null };
   expect(taskTimingState({ ...overdueTask, status: 'paused' })).toBeNull();
